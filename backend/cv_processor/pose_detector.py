@@ -40,6 +40,11 @@ class PoseDetector:
         model_path = os.path.join(MODELS_DIR, candidate)
         if not os.path.exists(model_path):
             model_path = os.path.join(MODELS_DIR, 'pose_landmarker_full.task')
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(
+                'Модели MediaPipe не найдены. Запустите: '
+                'python backend/cv_processor/download_models.py'
+            )
         with open(model_path, 'rb') as f:
             model_data = f.read()
         base_options = python.BaseOptions(model_asset_buffer=model_data)

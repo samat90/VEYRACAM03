@@ -31,6 +31,11 @@ YAWN_MIN_DURATION_MS = 800
 class BlinkDetector:
     def __init__(self, emotion_classifier=None):
         model_path = os.path.join(MODELS_DIR, 'face_landmarker.task')
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(
+                'Модели MediaPipe не найдены. Запустите: '
+                'python backend/cv_processor/download_models.py'
+            )
         with open(model_path, 'rb') as f:
             model_data = f.read()
         base_options = python.BaseOptions(model_asset_buffer=model_data)
