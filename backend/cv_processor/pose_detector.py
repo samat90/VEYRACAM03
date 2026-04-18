@@ -65,6 +65,12 @@ class PoseDetector:
 
         self.current_status = 'норма'
 
+    def _calibration_complete(self):
+        return (
+            self.baseline_spine_angle is not None
+            or self.baseline_shoulder_angle is not None
+        )
+
     def _timestamp_ms(self):
         return max(1, int(time.monotonic() * 1000) - self._start_ms)
 
@@ -90,8 +96,9 @@ class PoseDetector:
             'landmarks': None,
             'mode': None,
             'confidence': 0.0,
-            'calibrating': False,
+            'calibrating': not self._calibration_complete(),
             'calibration_progress': 0.0,
+            'calibration_complete': self._calibration_complete(),
         }
 
         landmarks, _ = self.detect(image)
@@ -135,7 +142,7 @@ class PoseDetector:
             raw_angle = float(abs(np.degrees(np.arctan2(dy, dx))))
             mode = 'shoulders'
 
-        if len(self.calibration_samples) < CALIBRATION_FRAMES:
+        if not self._calibration_complete():
             self.calibration_samples.append((mode, raw_angle))
             posture_data['calibrating'] = True
             posture_data['calibration_progress'] = round(
@@ -144,10 +151,13 @@ class PoseDetector:
             posture_data['angle'] = round(raw_angle, 1)
             posture_data['mode'] = mode
             posture_data['status'] = 'калибровка'
-            if len(self.calibration_samples) == CALIBRATION_FRAMES:
+            if len(self.calibration_samples) >= CALIBRATION_FRAMES:
                 self._finalize_calibration()
+                posture_data['calibration_complete'] = self._calibration_complete()
             return posture_data
 
+        posture_data['calibrating'] = False
+        posture_data['calibration_complete'] = True
         posture_data['calibration_progress'] = 1.0
 
         baseline = (

@@ -14,8 +14,14 @@ def _load_env_file(path: Path) -> None:
         line = raw.strip()
         if not line or line.startswith('#') or '=' not in line:
             continue
+        if line.startswith('export '):
+            line = line[len('export '):]
         key, value = line.split('=', 1)
-        os.environ.setdefault(key.strip(), value.strip())
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
 
 
 _load_env_file(PROJECT_ROOT / '.env')

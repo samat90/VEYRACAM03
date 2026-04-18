@@ -82,6 +82,9 @@ class VeyraCamera {
         document.getElementById('pose-status').textContent = '—';
 
         if (this.calibrationOverlay) this.calibrationOverlay.style.display = 'none';
+        if (this.octx) {
+            this.octx.clearRect(0, 0, this.overlay.width, this.overlay.height);
+        }
 
         try {
             const resp = await fetch('/stop-session/', {
@@ -172,13 +175,13 @@ class VeyraCamera {
         const postureProg = posture.calibration_progress || 0;
         const blinkProg = blink.calibration_progress || 0;
         const minProg = Math.min(postureProg, blinkProg);
-        const stillCalibrating = posture.calibrating || blink.calibrating;
+        const bothDone = posture.calibration_complete && blink.calibration_complete;
 
         if (this.calibrationBar) {
             this.calibrationBar.style.width = Math.round(minProg * 100) + '%';
         }
         if (this.calibrationOverlay) {
-            this.calibrationOverlay.style.display = stillCalibrating ? '' : 'none';
+            this.calibrationOverlay.style.display = bothDone ? 'none' : '';
         }
     }
 

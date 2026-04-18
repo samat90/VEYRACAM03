@@ -99,6 +99,7 @@ class BlinkDetector:
         return most_common, avg_conf
 
     def detect_blink(self, image):
+        calibrated = self.ear_threshold is not None
         blink_data = {
             'ear': 0.0,
             'mar': 0.0,
@@ -108,8 +109,9 @@ class BlinkDetector:
             'long_blink_count': self.long_blink_count,
             'emotion': 'neutral',
             'emotion_confidence': 0.0,
-            'calibrating': False,
-            'calibration_progress': 0.0,
+            'calibrating': not calibrated,
+            'calibration_complete': calibrated,
+            'calibration_progress': 1.0 if calibrated else 0.0,
             'threshold': None,
             'yawn_count': self.yawn_count,
             'yawn_rate': 0.0,
@@ -155,6 +157,7 @@ class BlinkDetector:
             self.ear_open_samples.append(ear)
             progress = len(self.ear_open_samples) / CALIBRATION_SAMPLES
             blink_data['calibrating'] = True
+            blink_data['calibration_complete'] = False
             blink_data['calibration_progress'] = round(min(1.0, progress), 2)
             if len(self.ear_open_samples) >= CALIBRATION_MIN:
                 arr = np.array(self.ear_open_samples)
@@ -162,10 +165,13 @@ class BlinkDetector:
                 mean_open = float(np.mean(open_vals))
                 std_open = float(np.std(open_vals)) if len(open_vals) > 1 else 0.02
                 self.ear_threshold = max(0.12, mean_open - 3.5 * std_open)
+                blink_data['calibration_complete'] = True
             blink_data['threshold'] = self.ear_threshold
             return blink_data
 
         blink_data['threshold'] = round(self.ear_threshold, 3)
+        blink_data['calibrating'] = False
+        blink_data['calibration_complete'] = True
         blink_data['calibration_progress'] = 1.0
         is_closed = ear < self.ear_threshold
 
