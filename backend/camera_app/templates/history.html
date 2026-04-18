@@ -1,0 +1,146 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-3" style="color: white;">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3 class="mb-0">История сессий</h3>
+        <div class="d-flex gap-2 align-items-center">
+            <select id="session-select" class="form-select form-select-sm" style="width: 280px;">
+                <option value="">Выберите сессию</option>
+            </select>
+            <a href="/" class="btn btn-sm btn-outline-light">Назад к камере</a>
+        </div>
+    </div>
+
+    <div id="charts-wrap" class="row g-3">
+        <div class="col-md-6">
+            <div class="dashboard-card p-3"><canvas id="chart-posture"></canvas></div>
+        </div>
+        <div class="col-md-6">
+            <div class="dashboard-card p-3"><canvas id="chart-blink"></canvas></div>
+        </div>
+        <div class="col-md-6">
+            <div class="dashboard-card p-3"><canvas id="chart-perclos"></canvas></div>
+        </div>
+        <div class="col-md-6">
+            <div class="dashboard-card p-3"><canvas id="chart-breath"></canvas></div>
+        </div>
+        <div class="col-12">
+            <div class="dashboard-card p-3"><canvas id="chart-emotion" style="max-height: 180px;"></canvas></div>
+        </div>
+    </div>
+
+    <div id="empty-state" class="text-center py-5" style="display:none;">
+        <p>Нет сохранённых данных. Запустите камеру на главной странице.</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+let charts = {};
+
+function destroyCharts() {
+    Object.values(charts).forEach(c => c && c.destroy());
+    charts = {};
+}
+
+function makeLineChart(id, label, data, labels, color) {
+    const ctx = document.getElementById(id).getContext('2d');
+    return new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: label,
+                data: data,
+                borderColor: color,
+                backgroundColor: color + '33',
+                tension: 0.25,
+                pointRadius: 0,
+                spanGaps: true,
+            }],
+        },
+        options: {
+            responsive: true,
+            scales: {
+                x: { ticks: { maxTicksLimit: 8 } },
+            },
+        },
+    });
+}
+
+function renderSamples(samples) {
+    destroyCharts();
+    if (!samples || samples.length === 0) {
+        document.getElementById('charts-wrap').style.display = 'none';
+        document.getElementById('empty-state').style.display = '';
+        return;
+    }
+    document.getElementById('charts-wrap').style.display = '';
+    document.getElementById('empty-state').style.display = 'none';
+
+    const labels = samples.map(s => new Date(s.ts).toLocaleTimeString('ru-RU'));
+    charts.posture = makeLineChart('chart-posture', 'Угол осанки (°)',
+        samples.map(s => s.posture_angle), labels, '#dc3545');
+    charts.blink = makeLineChart('chart-blink', 'Моргания (в мин)',
+        samples.map(s => s.blink_rate), labels, '#007bff');
+    charts.perclos = makeLineChart('chart-perclos', 'PERCLOS (%)',
+        samples.map(s => s.perclos), labels, '#ffc107');
+    charts.breath = makeLineChart('chart-breath', 'Дыхание (циклов/мин)',
+        samples.map(s => s.breath_rate), labels, '#28a745');
+
+    const emoCounts = {};
+    samples.forEach(s => {
+        if (s.emotion) emoCounts[s.emotion] = (emoCounts[s.emotion] || 0) + 1;
+    });
+    const emoLabels = Object.keys(emoCounts);
+    const emoData = Object.values(emoCounts);
+    const ctx = document.getElementById('chart-emotion').getContext('2d');
+    charts.emotion = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: emoLabels,
+            datasets: [{
+                label: 'Распределение эмоций',
+                data: emoData,
+                backgroundColor: ['#28a745', '#dc3545', '#6f42c1', '#fd7e14', '#6c757d'],
+            }],
+        },
+        options: { indexAxis: 'y', responsive: true },
+    });
+}
+
+async function loadSessions() {
+    const res = await fetch('/api/sessions/');
+    const data = await res.json();
+    const select = document.getElementById('session-select');
+    data.sessions.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        const d = new Date(s.started_at);
+        opt.textContent = `#${s.id} · ${d.toLocaleString('ru-RU')} · ${s.samples} замеров`;
+        select.appendChild(opt);
+    });
+    if (data.sessions.length > 0) {
+        select.value = data.sessions[0].id;
+        loadSession(data.sessions[0].id);
+    } else {
+        renderSamples([]);
+    }
+}
+
+async function loadSession(id) {
+    const res = await fetch(`/api/history/?session_id=${id}`);
+    const data = await res.json();
+    renderSamples(data.samples);
+}
+
+document.getElementById('session-select').addEventListener('change', e => {
+    if (e.target.value) loadSession(e.target.value);
+});
+
+loadSessions();
+</script>
+{% endblock %}

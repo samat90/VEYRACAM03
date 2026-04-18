@@ -1,0 +1,103 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row g-3 h-100">
+    <div class="col-lg-7 col-md-6 d-flex">
+        <div class="dashboard-card video-card flex-grow-1">
+            <div class="video-box">
+                <video id="video" autoplay playsinline muted></video>
+                <canvas id="overlay"></canvas>
+                <canvas id="canvas" style="display: none;"></canvas>
+                <div id="calibration-overlay" class="calibration-overlay" style="display:none;">
+                    <div class="text-center">
+                        <div class="mb-2" style="font-weight: 600;">Калибровка</div>
+                        <div class="progress" style="width: 220px; height: 10px;">
+                            <div id="calibration-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-info" style="width: 0%;"></div>
+                        </div>
+                        <small id="calibration-hint" class="d-block mt-2" style="color:#cfd9ff;">Сидите ровно и смотрите в камеру</small>
+                    </div>
+                </div>
+            </div>
+            <div class="controls">
+                <button id="start-btn" class="btn btn-success">Запустить камеру</button>
+                <button id="stop-btn" class="btn btn-danger" disabled>Остановить</button>
+                <a href="/history/" class="btn btn-outline-light">История</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5 col-md-6 side-col">
+        <div class="metric-grid">
+            <div class="dashboard-card metric-card text-center">
+                <h6>Осанка</h6>
+                <div id="posture-value" class="metric-value">—</div>
+                <small id="posture-status">не определено</small>
+            </div>
+            <div class="dashboard-card metric-card text-center">
+                <h6>Моргания</h6>
+                <div id="blink-value" class="metric-value">0</div>
+                <small>в мин · PERCLOS <span id="perclos-value">0%</span></small>
+            </div>
+            <div class="dashboard-card metric-card text-center">
+                <h6>Дыхание</h6>
+                <div id="breath-value" class="metric-value">—</div>
+                <small>циклов в минуту</small>
+            </div>
+            <div class="dashboard-card metric-card text-center">
+                <h6>Пульс</h6>
+                <div id="hr-value" class="metric-value">—</div>
+                <small id="hr-detail">прогрев ~10 сек</small>
+            </div>
+            <div class="dashboard-card metric-card text-center">
+                <h6>Эмоции</h6>
+                <div id="emotion-value" class="metric-value">—</div>
+                <small id="emotion-detail">уверенность 0%</small>
+            </div>
+            <div class="dashboard-card metric-card text-center">
+                <h6>Внимание</h6>
+                <div id="attention-value" class="metric-value" style="font-size: 1.1rem;">—</div>
+                <small id="head-pose-detail">pitch — · yaw —</small>
+            </div>
+        </div>
+
+        <div class="dashboard-card metric-card">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h6 class="mb-0">Индекс усталости</h6>
+                    <small id="fatigue-hint">чем ниже, тем лучше</small>
+                </div>
+                <div id="fatigue-value" class="metric-value">0</div>
+            </div>
+            <div class="progress mt-2" style="height: 8px;">
+                <div id="fatigue-bar" class="progress-bar bg-success" style="width: 0%;"></div>
+            </div>
+        </div>
+
+        <div id="advice-card" class="advice-card flex-grow-1 d-flex flex-column justify-content-center">
+            <div class="label mb-1">Рекомендация</div>
+            <p id="advice-text">Запустите камеру — система соберёт базу и начнёт давать советы.</p>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="summary-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Итоги сессии</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="summary-body">—</div>
+            <div class="modal-footer">
+                <a href="/history/" class="btn btn-outline-primary">Открыть историю</a>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% csrf_token %}
+<script src="/static/js/camera.js"></script>
+{% endblock %}
