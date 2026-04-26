@@ -35,7 +35,9 @@ CALIBRATION_FRAMES = 30
 
 
 class PoseDetector:
-    def __init__(self, model_variant='heavy'):
+    def __init__(self, model_variant=None):
+        if model_variant is None:
+            model_variant = os.environ.get('POSE_MODEL_VARIANT', 'heavy')
         candidate = f'pose_landmarker_{model_variant}.task'
         model_path = os.path.join(MODELS_DIR, candidate)
         if not os.path.exists(model_path):

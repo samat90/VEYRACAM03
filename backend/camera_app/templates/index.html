@@ -28,9 +28,10 @@
                 </div>
             </div>
             <div class="controls">
-                <button id="start-btn" class="btn btn-success">Запустить камеру</button>
+                <button id="start-btn" class="btn btn-success">Запустить</button>
+                <button id="pause-btn" class="btn btn-warning" disabled>Пауза</button>
                 <button id="stop-btn" class="btn btn-danger" disabled>Остановить</button>
-                <a href="/history/" class="btn btn-outline-light">История</a>
+                <a href="/history/" class="btn btn-outline-secondary">История</a>
             </div>
         </div>
     </div>
@@ -98,8 +99,30 @@
             </div>
             <div class="modal-body" id="summary-body">—</div>
             <div class="modal-footer">
-                <a href="/history/" class="btn btn-outline-primary">Открыть историю</a>
+                <a id="summary-export-csv" href="#" class="btn btn-outline-primary">Скачать CSV</a>
+                <a href="/history/" class="btn btn-outline-primary">История</a>
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="tos-modal" tabindex="-1" data-bs-backdrop="static" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title">Перед началом</h5></div>
+            <div class="modal-body">
+                <p class="mb-2">Приложению потребуется доступ к камере. Изображение
+                    обрабатывается локально на этом компьютере, никуда не отправляется
+                    и не сохраняется. В базу пишутся только числовые метрики.</p>
+                <ul class="mb-0 small">
+                    <li>Разрешите доступ к камере в браузере при запросе.</li>
+                    <li>Сидите перед камерой ровно ~2 секунды для калибровки.</li>
+                    <li>Любые данные можно удалить, очистив файл db.sqlite3.</li>
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button id="tos-accept" type="button" class="btn btn-primary" data-bs-dismiss="modal">Понятно</button>
             </div>
         </div>
     </div>
@@ -108,5 +131,6 @@
 
 {% block scripts %}
 {% csrf_token %}
+<script>document.body.dataset.page = 'index';</script>
 <script src="/static/js/camera.js"></script>
 {% endblock %}

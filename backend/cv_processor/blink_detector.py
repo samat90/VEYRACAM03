@@ -130,6 +130,7 @@ class BlinkDetector:
             'attention': 'unknown',
             'heart_rate': 0.0,
             'heart_rate_confidence': 0.0,
+            'rppg_roi': None,
         }
 
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -162,6 +163,7 @@ class BlinkDetector:
         rppg_data = self.rppg.update(image, landmarks)
         blink_data['heart_rate'] = rppg_data['heart_rate']
         blink_data['heart_rate_confidence'] = rppg_data['confidence']
+        blink_data['rppg_roi'] = rppg_data.get('roi')
 
         if self.ear_threshold is None:
             self.ear_open_samples.append(ear)

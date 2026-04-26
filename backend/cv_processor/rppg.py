@@ -1,10 +1,13 @@
 """Оценка пульса по ROI лба методом CHROM."""
 
+import logging
 import time
 import numpy as np
 import cv2
 from collections import deque
 from scipy import signal
+
+logger = logging.getLogger(__name__)
 
 FOREHEAD_LANDMARKS = [10, 67, 109, 338, 297, 151]
 
@@ -34,7 +37,12 @@ class RPPGDetector:
             self.b_buffer.popleft()
 
     def update(self, bgr_image, face_landmarks):
-        data = {'heart_rate': self.heart_rate, 'confidence': self.confidence, 'ready': False}
+        data = {
+            'heart_rate': self.heart_rate,
+            'confidence': self.confidence,
+            'ready': False,
+            'roi': None,
+        }
         if face_landmarks is None:
             return data
 
@@ -49,6 +57,13 @@ class RPPGDetector:
 
         if x2 - x1 < 10 or y2 - y1 < 10:
             return data
+
+        data['roi'] = {
+            'x': round(x1 / w, 4),
+            'y': round(y1 / h, 4),
+            'w': round((x2 - x1) / w, 4),
+            'h': round((y2 - y1) / h, 4),
+        }
 
         roi = bgr_image[y1:y2, x1:x2]
         if roi.size == 0:
@@ -108,7 +123,8 @@ class RPPGDetector:
                 return
             xf = signal.filtfilt(b_coef, a_coef, x)
             yf = signal.filtfilt(b_coef, a_coef, y)
-        except (ValueError, RuntimeError):
+        except (ValueError, RuntimeError) as exc:
+            logger.debug('rPPG filter failed (fs=%.1f, n=%d): %s', fs, len(x), exc)
             return
 
         alpha = np.std(xf) / (np.std(yf) + 1e-8)

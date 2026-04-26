@@ -41,12 +41,16 @@ class EmotionClassifier:
             h, w = bgr_image.shape[:2]
             xs = [lm.x for lm in face_landmarks]
             ys = [lm.y for lm in face_landmarks]
-            x1 = max(0, int(min(xs) * w) - 10)
-            y1 = max(0, int(min(ys) * h) - 10)
-            x2 = min(w, int(max(xs) * w) + 10)
-            y2 = min(h, int(max(ys) * h) + 10)
+            cx = (min(xs) + max(xs)) / 2.0
+            cy = (min(ys) + max(ys)) / 2.0
+            half = max(max(xs) - min(xs), max(ys) - min(ys)) / 2.0 * 1.15
 
-            if x2 <= x1 or y2 <= y1:
+            x1 = max(0, int((cx - half) * w))
+            y1 = max(0, int((cy - half) * h))
+            x2 = min(w, int((cx + half) * w))
+            y2 = min(h, int((cy + half) * h))
+
+            if x2 - x1 < 16 or y2 - y1 < 16:
                 return 'neutral', 0.0
 
             face = bgr_image[y1:y2, x1:x2]

@@ -1,4 +1,6 @@
 import base64
+import csv
+import io
 import json
 import logging
 import time
@@ -7,7 +9,7 @@ from collections import Counter
 import cv2
 import numpy as np
 from django.db.models import Avg, Count
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
@@ -45,6 +47,15 @@ def _get_history(session_key):
         buf = HistoryBuffer(size=80)
         _history_buffers[session_key] = buf
     return buf
+
+
+def _get_or_create_db_session(session_key):
+    sid = _active_session_obj.get(session_key)
+    if sid is None:
+        session = AnalysisSession.objects.create(session_key=session_key)
+        sid = session.id
+        _active_session_obj[session_key] = sid
+    return sid
 
 
 def index(request):
@@ -122,6 +133,7 @@ def process_frame(request):
         return JsonResponse({
             'success': True,
             'pose_landmarks': pose_landmarks,
+            'rppg_roi': blink_data.get('rppg_roi'),
             'posture': {
                 'angle': metrics['posture_angle'],
                 'status': metrics['posture_status'],
@@ -167,6 +179,12 @@ def process_frame(request):
     except Exception as exc:
         logger.exception('process_frame failed: %s', exc)
         return JsonResponse({'success': False, 'error': str(exc)}, status=500)
+
+
+@require_POST
+def pause_session(request):
+    """Не сбрасывает детекторы — калибровка и счётчики сохраняются."""
+    return JsonResponse({'success': True})
 
 
 @require_POST
@@ -237,18 +255,7 @@ def session_history(request):
     samples = []
     if sid is not None:
         qs = MetricSample.objects.filter(session_id=sid).order_by('created_at')[:600]
-        samples = [
-            {
-                'ts': s.created_at.isoformat(),
-                'posture_angle': s.posture_angle,
-                'posture_status': s.posture_status,
-                'blink_rate': s.blink_rate,
-                'perclos': s.perclos,
-                'breath_rate': s.breath_rate,
-                'emotion': s.emotion,
-            }
-            for s in qs
-        ]
+        samples = [_sample_to_dict(s) for s in qs]
     return JsonResponse({'success': True, 'samples': samples, 'session_id': sid})
 
 
@@ -269,20 +276,64 @@ def session_list(request):
     })
 
 
+@require_GET
+def export_session(request, session_id):
+    fmt = request.GET.get('format', 'csv').lower()
+    samples = MetricSample.objects.filter(session_id=session_id).order_by('created_at')
+    if not samples.exists():
+        return JsonResponse({'success': False, 'error': 'No data'}, status=404)
+
+    rows = [_sample_to_dict(s) for s in samples]
+
+    if fmt == 'json':
+        resp = JsonResponse({'session_id': int(session_id), 'samples': rows}, json_dumps_params={'ensure_ascii': False})
+        resp['Content-Disposition'] = f'attachment; filename="session_{session_id}.json"'
+        return resp
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+    writer.writeheader()
+    writer.writerows(rows)
+    resp = HttpResponse(buf.getvalue(), content_type='text/csv; charset=utf-8')
+    resp['Content-Disposition'] = f'attachment; filename="session_{session_id}.csv"'
+    return resp
+
+
+def _sample_to_dict(s):
+    return {
+        'ts': s.created_at.isoformat(),
+        'posture_angle': s.posture_angle,
+        'posture_status': s.posture_status,
+        'blink_rate': s.blink_rate,
+        'perclos': s.perclos,
+        'breath_rate': s.breath_rate,
+        'emotion': s.emotion,
+    }
+
+
 def _persist_sample(session_key, m):
     now = time.time()
-    last = _last_sample_ts.get(session_key, 0)
-    if now - last < METRIC_SAMPLE_INTERVAL_SEC:
+    last = _last_sample_ts.get(session_key)
+    sid = _active_session_obj.get(session_key)
+
+    if last is None and sid is None:
+        # Первый кадр сессии — фиксируем started_at сейчас, а не через 5 секунд
+        sid = _get_or_create_db_session(session_key)
+        _last_sample_ts[session_key] = now
+        _save_sample_row(sid, m)
         return
+
+    if last is not None and now - last < METRIC_SAMPLE_INTERVAL_SEC:
+        return
+
     _last_sample_ts[session_key] = now
+    if sid is None:
+        sid = _get_or_create_db_session(session_key)
+    _save_sample_row(sid, m)
 
+
+def _save_sample_row(sid, m):
     try:
-        sid = _active_session_obj.get(session_key)
-        if sid is None:
-            session = AnalysisSession.objects.create(session_key=session_key)
-            sid = session.id
-            _active_session_obj[session_key] = sid
-
         MetricSample.objects.create(
             session_id=sid,
             posture_angle=m.get('posture_angle'),

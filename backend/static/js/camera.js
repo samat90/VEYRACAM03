@@ -23,6 +23,7 @@ const POSE_CONNECTIONS = [
 const TARGET_FPS = 15;
 const FRAME_INTERVAL_MS = Math.round(1000 / TARGET_FPS);
 const FRAME_TIMEOUT_MS = 4000;
+const CALIBRATION_HELP_AFTER_MS = 15000;
 
 class VeyraCamera {
     constructor() {
@@ -33,19 +34,23 @@ class VeyraCamera {
         this.octx = this.overlay ? this.overlay.getContext('2d') : null;
         this.calibrationOverlay = document.getElementById('calibration-overlay');
         this.calibrationBar = document.getElementById('calibration-bar');
+        this.calibrationHint = document.getElementById('calibration-hint');
         this.errorBanner = document.getElementById('error-banner');
 
         this.isStreaming = false;
+        this.isPaused = false;
         this.stream = null;
         this.frameCount = 0;
         this.inFlight = false;
         this.consecutiveErrors = 0;
         this.loopTimer = null;
+        this.calibrationStartedAt = null;
         this.bindEvents();
     }
 
     bindEvents() {
         document.getElementById('start-btn').addEventListener('click', () => this.startCamera());
+        document.getElementById('pause-btn').addEventListener('click', () => this.togglePause());
         document.getElementById('stop-btn').addEventListener('click', () => this.stopCamera());
     }
 
@@ -65,6 +70,8 @@ class VeyraCamera {
             }
 
             document.getElementById('start-btn').disabled = true;
+            document.getElementById('pause-btn').disabled = false;
+            document.getElementById('pause-btn').textContent = 'Пауза';
             document.getElementById('stop-btn').disabled = false;
             document.getElementById('camera-status').className = 'badge bg-success';
             document.getElementById('camera-status').textContent = 'Активна';
@@ -72,9 +79,11 @@ class VeyraCamera {
                 `${this.video.videoWidth}x${this.video.videoHeight}`;
 
             if (this.calibrationOverlay) this.calibrationOverlay.style.display = '';
+            this.calibrationStartedAt = Date.now();
             this.hideError();
 
             this.isStreaming = true;
+            this.isPaused = false;
             this.startProcessing();
         } catch (err) {
             console.error('Camera access error:', err);
@@ -82,8 +91,22 @@ class VeyraCamera {
         }
     }
 
+    togglePause() {
+        if (!this.isStreaming) return;
+        this.isPaused = !this.isPaused;
+        const btn = document.getElementById('pause-btn');
+        btn.textContent = this.isPaused ? 'Продолжить' : 'Пауза';
+        if (this.isPaused) {
+            fetch('/pause-session/', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': getCookie('csrftoken') },
+            }).catch(() => {});
+        }
+    }
+
     async stopCamera() {
         this.isStreaming = false;
+        this.isPaused = false;
         if (this.loopTimer) {
             clearTimeout(this.loopTimer);
             this.loopTimer = null;
@@ -94,6 +117,8 @@ class VeyraCamera {
         }
         this.video.srcObject = null;
         document.getElementById('start-btn').disabled = false;
+        document.getElementById('pause-btn').disabled = true;
+        document.getElementById('pause-btn').textContent = 'Пауза';
         document.getElementById('stop-btn').disabled = true;
         document.getElementById('camera-status').className = 'badge bg-secondary';
         document.getElementById('camera-status').textContent = 'Выключена';
@@ -123,16 +148,18 @@ class VeyraCamera {
 
         const tick = async () => {
             if (!this.isStreaming) return;
-            frames++;
-            const now = Date.now();
-            if (now - lastTime >= 1000) {
-                document.getElementById('fps').textContent =
-                    Math.round((frames * 1000) / (now - lastTime));
-                frames = 0;
-                lastTime = now;
-            }
-            if (!this.inFlight) {
-                await this.processSingleFrame();
+            if (!this.isPaused) {
+                frames++;
+                const now = Date.now();
+                if (now - lastTime >= 1000) {
+                    document.getElementById('fps').textContent =
+                        Math.round((frames * 1000) / (now - lastTime));
+                    frames = 0;
+                    lastTime = now;
+                }
+                if (!this.inFlight) {
+                    await this.processSingleFrame();
+                }
             }
             this.loopTimer = setTimeout(tick, FRAME_INTERVAL_MS);
         };
@@ -169,7 +196,7 @@ class VeyraCamera {
             if (data.success) {
                 this.consecutiveErrors = 0;
                 this.hideError();
-                this.drawSkeleton(data.pose_landmarks);
+                this.drawOverlay(data.pose_landmarks, data.rppg_roi);
                 this.renderMetrics(data);
                 if (data.advice) {
                     document.getElementById('advice-text').textContent = data.advice;
@@ -212,28 +239,38 @@ class VeyraCamera {
         if (this.errorBanner) this.errorBanner.style.display = 'none';
     }
 
-    drawSkeleton(landmarks) {
+    drawOverlay(landmarks, rppgRoi) {
         if (!this.octx) return;
-        this.octx.clearRect(0, 0, this.overlay.width, this.overlay.height);
-        if (!landmarks) return;
         const w = this.overlay.width;
         const h = this.overlay.height;
-        this.octx.lineWidth = 2;
-        this.octx.strokeStyle = 'rgba(255, 60, 60, 0.9)';
-        this.octx.beginPath();
-        for (const [a, b] of POSE_CONNECTIONS) {
-            const la = landmarks[a], lb = landmarks[b];
-            if (!la || !lb || la.v < 0.5 || lb.v < 0.5) continue;
-            this.octx.moveTo(la.x * w, la.y * h);
-            this.octx.lineTo(lb.x * w, lb.y * h);
+        this.octx.clearRect(0, 0, w, h);
+
+        if (rppgRoi) {
+            this.octx.strokeStyle = 'rgba(0, 210, 255, 0.7)';
+            this.octx.lineWidth = 2;
+            this.octx.setLineDash([6, 4]);
+            this.octx.strokeRect(rppgRoi.x * w, rppgRoi.y * h, rppgRoi.w * w, rppgRoi.h * h);
+            this.octx.setLineDash([]);
         }
-        this.octx.stroke();
-        this.octx.fillStyle = 'rgba(80, 255, 80, 0.95)';
-        for (const lm of landmarks) {
-            if (lm.v < 0.5) continue;
+
+        if (landmarks) {
+            this.octx.lineWidth = 2;
+            this.octx.strokeStyle = 'rgba(255, 60, 60, 0.9)';
             this.octx.beginPath();
-            this.octx.arc(lm.x * w, lm.y * h, 3, 0, Math.PI * 2);
-            this.octx.fill();
+            for (const [a, b] of POSE_CONNECTIONS) {
+                const la = landmarks[a], lb = landmarks[b];
+                if (!la || !lb || la.v < 0.5 || lb.v < 0.5) continue;
+                this.octx.moveTo(la.x * w, la.y * h);
+                this.octx.lineTo(lb.x * w, lb.y * h);
+            }
+            this.octx.stroke();
+            this.octx.fillStyle = 'rgba(80, 255, 80, 0.95)';
+            for (const lm of landmarks) {
+                if (lm.v < 0.5) continue;
+                this.octx.beginPath();
+                this.octx.arc(lm.x * w, lm.y * h, 3, 0, Math.PI * 2);
+                this.octx.fill();
+            }
         }
     }
 
@@ -250,6 +287,15 @@ class VeyraCamera {
         }
         if (this.calibrationOverlay) {
             this.calibrationOverlay.style.display = bothDone ? 'none' : '';
+        }
+        if (bothDone) {
+            this.calibrationStartedAt = null;
+        } else if (this.calibrationHint && this.calibrationStartedAt) {
+            const elapsed = Date.now() - this.calibrationStartedAt;
+            if (elapsed > CALIBRATION_HELP_AFTER_MS) {
+                this.calibrationHint.textContent =
+                    'Долго не получается? Включите свет, отсядьте дальше, чтобы плечи попадали в кадр.';
+            }
         }
     }
 
@@ -376,6 +422,10 @@ class VeyraCamera {
                 rows.map(([k, v]) => `<li><b>${k}:</b> ${v}</li>`).join('') +
                 '</ul>' +
                 (dist ? `<div><b>Распределение осанки:</b><ul>${dist}</ul></div>` : '');
+            const exportLink = document.getElementById('summary-export-csv');
+            if (exportLink && s.session_id) {
+                exportLink.href = `/api/export/${s.session_id}/?format=csv`;
+            }
         }
         const modalEl = document.getElementById('summary-modal');
         if (modalEl && window.bootstrap) {
@@ -385,5 +435,15 @@ class VeyraCamera {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    if (!localStorage.getItem('veyra_tos_accepted')) {
+        const tosEl = document.getElementById('tos-modal');
+        if (tosEl && window.bootstrap) {
+            bootstrap.Modal.getOrCreateInstance(tosEl).show();
+        }
+        const acc = document.getElementById('tos-accept');
+        if (acc) acc.addEventListener('click', () => {
+            localStorage.setItem('veyra_tos_accepted', '1');
+        });
+    }
     window.veyraCamera = new VeyraCamera();
 });

@@ -1,36 +1,31 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="container py-3" style="color: white;">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h3 class="mb-0">История сессий</h3>
-        <div class="d-flex gap-2 align-items-center">
-            <select id="session-select" class="form-select form-select-sm" style="width: 280px;">
-                <option value="">Выберите сессию</option>
-            </select>
+<div class="container py-3">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <h3 class="mb-0" style="color: white;">История сессий</h3>
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+            <select id="session-multi" class="form-select form-select-sm" multiple size="3" style="min-width: 320px; max-width: 420px;"></select>
             <a href="/" class="btn btn-sm btn-outline-light">Назад к камере</a>
         </div>
     </div>
 
-    <div id="charts-wrap" class="row g-3">
-        <div class="col-md-6">
-            <div class="dashboard-card p-3"><canvas id="chart-posture"></canvas></div>
-        </div>
-        <div class="col-md-6">
-            <div class="dashboard-card p-3"><canvas id="chart-blink"></canvas></div>
-        </div>
-        <div class="col-md-6">
-            <div class="dashboard-card p-3"><canvas id="chart-perclos"></canvas></div>
-        </div>
-        <div class="col-md-6">
-            <div class="dashboard-card p-3"><canvas id="chart-breath"></canvas></div>
-        </div>
-        <div class="col-12">
-            <div class="dashboard-card p-3"><canvas id="chart-emotion" style="max-height: 180px;"></canvas></div>
-        </div>
+    <div id="export-bar" class="dashboard-card p-2 mb-3 d-flex gap-2 align-items-center" style="display:none;">
+        <span class="me-2">Экспорт:</span>
+        <a id="export-csv" class="btn btn-sm btn-outline-primary" href="#">CSV</a>
+        <a id="export-json" class="btn btn-sm btn-outline-primary" href="#">JSON</a>
+        <small class="ms-2 text-muted">(берётся первая выбранная сессия)</small>
     </div>
 
-    <div id="empty-state" class="text-center py-5" style="display:none;">
+    <div id="charts-wrap" class="row g-3">
+        <div class="col-md-6"><div class="dashboard-card p-3"><canvas id="chart-posture"></canvas></div></div>
+        <div class="col-md-6"><div class="dashboard-card p-3"><canvas id="chart-blink"></canvas></div></div>
+        <div class="col-md-6"><div class="dashboard-card p-3"><canvas id="chart-perclos"></canvas></div></div>
+        <div class="col-md-6"><div class="dashboard-card p-3"><canvas id="chart-breath"></canvas></div></div>
+        <div class="col-12"><div class="dashboard-card p-3"><canvas id="chart-emotion" style="max-height: 220px;"></canvas></div></div>
+    </div>
+
+    <div id="empty-state" class="text-center py-5" style="color: white; display:none;">
         <p>Нет сохранённых данных. Запустите камеру на главной странице.</p>
     </div>
 </div>
@@ -39,6 +34,7 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
+const PALETTE = ['#dc3545', '#007bff', '#28a745', '#fd7e14', '#6f42c1'];
 let charts = {};
 
 function destroyCharts() {
@@ -46,101 +42,117 @@ function destroyCharts() {
     charts = {};
 }
 
-function makeLineChart(id, label, data, labels, color) {
+function makeMultiLineChart(id, label, datasets, labels) {
     const ctx = document.getElementById(id).getContext('2d');
     return new Chart(ctx, {
         type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: label,
-                data: data,
-                borderColor: color,
-                backgroundColor: color + '33',
-                tension: 0.25,
-                pointRadius: 0,
-                spanGaps: true,
-            }],
-        },
+        data: { labels, datasets },
         options: {
             responsive: true,
-            scales: {
-                x: { ticks: { maxTicksLimit: 8 } },
-            },
+            plugins: { title: { display: true, text: label } },
+            scales: { x: { ticks: { maxTicksLimit: 8 } } },
         },
     });
 }
 
-function renderSamples(samples) {
+function buildLineDatasets(seriesList, key, labelFmt) {
+    return seriesList.map((s, i) => ({
+        label: labelFmt(s),
+        data: s.samples.map(x => x[key]),
+        borderColor: PALETTE[i % PALETTE.length],
+        backgroundColor: PALETTE[i % PALETTE.length] + '22',
+        tension: 0.25,
+        pointRadius: 0,
+        spanGaps: true,
+    }));
+}
+
+function emotionDistribution(samples) {
+    const c = {};
+    samples.forEach(s => { if (s.emotion) c[s.emotion] = (c[s.emotion] || 0) + 1; });
+    return c;
+}
+
+function renderSeries(seriesList) {
     destroyCharts();
-    if (!samples || samples.length === 0) {
+    if (!seriesList.length || seriesList.every(s => !s.samples.length)) {
         document.getElementById('charts-wrap').style.display = 'none';
         document.getElementById('empty-state').style.display = '';
+        document.getElementById('export-bar').style.display = 'none';
         return;
     }
     document.getElementById('charts-wrap').style.display = '';
     document.getElementById('empty-state').style.display = 'none';
+    document.getElementById('export-bar').style.display = '';
 
-    const labels = samples.map(s => new Date(s.ts).toLocaleTimeString('ru-RU'));
-    charts.posture = makeLineChart('chart-posture', 'Угол осанки (°)',
-        samples.map(s => s.posture_angle), labels, '#dc3545');
-    charts.blink = makeLineChart('chart-blink', 'Моргания (в мин)',
-        samples.map(s => s.blink_rate), labels, '#007bff');
-    charts.perclos = makeLineChart('chart-perclos', 'PERCLOS (%)',
-        samples.map(s => s.perclos), labels, '#ffc107');
-    charts.breath = makeLineChart('chart-breath', 'Дыхание (циклов/мин)',
-        samples.map(s => s.breath_rate), labels, '#28a745');
+    const longest = seriesList.reduce((a, b) => b.samples.length > a.samples.length ? b : a);
+    const labels = longest.samples.map(s => new Date(s.ts).toLocaleTimeString('ru-RU'));
 
-    const emoCounts = {};
-    samples.forEach(s => {
-        if (s.emotion) emoCounts[s.emotion] = (emoCounts[s.emotion] || 0) + 1;
-    });
-    const emoLabels = Object.keys(emoCounts);
-    const emoData = Object.values(emoCounts);
+    const fmt = s => `Сессия #${s.id}`;
+    charts.posture = makeMultiLineChart('chart-posture', 'Угол осанки (°)',
+        buildLineDatasets(seriesList, 'posture_angle', fmt), labels);
+    charts.blink = makeMultiLineChart('chart-blink', 'Моргания (в мин)',
+        buildLineDatasets(seriesList, 'blink_rate', fmt), labels);
+    charts.perclos = makeMultiLineChart('chart-perclos', 'PERCLOS (%)',
+        buildLineDatasets(seriesList, 'perclos', fmt), labels);
+    charts.breath = makeMultiLineChart('chart-breath', 'Дыхание (циклов/мин)',
+        buildLineDatasets(seriesList, 'breath_rate', fmt), labels);
+
+    const allEmotions = new Set();
+    const distros = seriesList.map(s => emotionDistribution(s.samples));
+    distros.forEach(d => Object.keys(d).forEach(k => allEmotions.add(k)));
+    const emoLabels = [...allEmotions];
+    const emoDatasets = distros.map((d, i) => ({
+        label: fmt(seriesList[i]),
+        data: emoLabels.map(k => d[k] || 0),
+        backgroundColor: PALETTE[i % PALETTE.length],
+    }));
     const ctx = document.getElementById('chart-emotion').getContext('2d');
     charts.emotion = new Chart(ctx, {
         type: 'bar',
-        data: {
-            labels: emoLabels,
-            datasets: [{
-                label: 'Распределение эмоций',
-                data: emoData,
-                backgroundColor: ['#28a745', '#dc3545', '#6f42c1', '#fd7e14', '#6c757d'],
-            }],
-        },
-        options: { indexAxis: 'y', responsive: true },
+        data: { labels: emoLabels, datasets: emoDatasets },
+        options: { responsive: true, plugins: { title: { display: true, text: 'Распределение эмоций' } } },
     });
-}
 
-async function loadSessions() {
-    const res = await fetch('/api/sessions/');
-    const data = await res.json();
-    const select = document.getElementById('session-select');
-    data.sessions.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = s.id;
-        const d = new Date(s.started_at);
-        opt.textContent = `#${s.id} · ${d.toLocaleString('ru-RU')} · ${s.samples} замеров`;
-        select.appendChild(opt);
-    });
-    if (data.sessions.length > 0) {
-        select.value = data.sessions[0].id;
-        loadSession(data.sessions[0].id);
-    } else {
-        renderSamples([]);
-    }
+    const first = seriesList[0];
+    document.getElementById('export-csv').href = `/api/export/${first.id}/?format=csv`;
+    document.getElementById('export-json').href = `/api/export/${first.id}/?format=json`;
 }
 
 async function loadSession(id) {
-    const res = await fetch(`/api/history/?session_id=${id}`);
-    const data = await res.json();
-    renderSamples(data.samples);
+    const r = await fetch(`/api/history/?session_id=${id}`);
+    const d = await r.json();
+    return { id, samples: d.samples || [] };
 }
 
-document.getElementById('session-select').addEventListener('change', e => {
-    if (e.target.value) loadSession(e.target.value);
-});
+async function refreshSelection() {
+    const select = document.getElementById('session-multi');
+    const ids = Array.from(select.selectedOptions).map(o => o.value).slice(0, 3);
+    if (!ids.length) {
+        renderSeries([]);
+        return;
+    }
+    const series = await Promise.all(ids.map(loadSession));
+    renderSeries(series);
+}
 
+async function loadSessions() {
+    const r = await fetch('/api/sessions/');
+    const d = await r.json();
+    const select = document.getElementById('session-multi');
+    select.innerHTML = '';
+    d.sessions.forEach((s, i) => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = `#${s.id} · ${new Date(s.started_at).toLocaleString('ru-RU')} · ${s.samples} замеров`;
+        if (i === 0) opt.selected = true;
+        select.appendChild(opt);
+    });
+    if (d.sessions.length) refreshSelection();
+    else renderSeries([]);
+}
+
+document.getElementById('session-multi').addEventListener('change', refreshSelection);
 loadSessions();
 </script>
 {% endblock %}
