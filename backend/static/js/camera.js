@@ -65,8 +65,7 @@ class VeyraCamera {
     initRadar() {
         const canvas = document.getElementById('radar');
         if (!canvas || !window.Chart) return;
-        const styles = getComputedStyle(document.documentElement);
-        const text = styles.getPropertyValue('--card-text') || '#222';
+        const text = '#1a1a2e';
         this.radarChart = new Chart(canvas.getContext('2d'), {
             type: 'radar',
             data: {
