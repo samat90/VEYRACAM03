@@ -88,8 +88,20 @@
         .controls { display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
         .controls .btn { flex: 1 1 0; padding: 0.45rem 0.5rem; font-size: 0.92rem; min-width: 100px; }
 
-        .side-col { height: 100%; display: flex; flex-direction: column; gap: 0.6rem; }
-        .metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+        .side-col {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+        .side-col::-webkit-scrollbar { width: 6px; }
+        .side-col::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 3px; }
+        .metric-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.5rem; }
+        .metric-grid .metric-value { font-size: 1.25rem; }
+        .metric-grid .metric-card { padding: 0.5rem !important; }
+        .advice-card { flex-shrink: 0; }
 
         .advice-card {
             background: var(--advice-bg);

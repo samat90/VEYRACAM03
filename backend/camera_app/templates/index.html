@@ -51,28 +51,43 @@
             </div>
             <div class="dashboard-card metric-card text-center">
                 <h6>Моргания</h6>
-                <div id="blink-value" class="metric-value">0</div>
-                <small>в мин · PERCLOS <span id="perclos-value">0%</span></small>
+                <div id="blink-value" class="metric-value">—</div>
+                <small>в мин · PERCLOS <span id="perclos-value">—</span></small>
             </div>
             <div class="dashboard-card metric-card text-center">
                 <h6>Дыхание</h6>
                 <div id="breath-value" class="metric-value">—</div>
-                <small>циклов в минуту</small>
+                <small>цикл/мин</small>
             </div>
             <div class="dashboard-card metric-card text-center">
                 <h6>Пульс</h6>
                 <div id="hr-value" class="metric-value">—</div>
-                <small id="hr-detail">прогрев ~10 сек</small>
+                <small id="hr-detail">~10 сек</small>
+            </div>
+            <div class="dashboard-card metric-card text-center">
+                <h6>HRV</h6>
+                <div id="hrv-value" class="metric-value">—</div>
+                <small id="hrv-detail">RMSSD мс</small>
             </div>
             <div class="dashboard-card metric-card text-center">
                 <h6>Эмоции</h6>
                 <div id="emotion-value" class="metric-value">—</div>
-                <small id="emotion-detail">уверенность 0%</small>
+                <small id="emotion-detail">—</small>
             </div>
             <div class="dashboard-card metric-card text-center">
                 <h6>Внимание</h6>
-                <div id="attention-value" class="metric-value" style="font-size: 1.1rem;">—</div>
-                <small id="head-pose-detail">pitch — · yaw —</small>
+                <div id="attention-value" class="metric-value" style="font-size: 1rem;">—</div>
+                <small id="head-pose-detail">—</small>
+            </div>
+            <div class="dashboard-card metric-card text-center">
+                <h6>Стабильность</h6>
+                <div id="stability-value" class="metric-value">—</div>
+                <small>std угла</small>
+            </div>
+            <div class="dashboard-card metric-card text-center">
+                <h6>Зевки</h6>
+                <div id="yawn-value" class="metric-value">—</div>
+                <small>за сессию</small>
             </div>
         </div>
 
@@ -81,35 +96,38 @@
                 <div style="flex: 1 1 0;">
                     <div class="d-flex justify-content-between align-items-center">
                         <h6 class="mb-0">Усталость</h6>
-                        <span id="fatigue-value" class="metric-value" style="font-size:1.2rem;">0</span>
+                        <span id="fatigue-value" class="metric-value" style="font-size:1.1rem;">—</span>
                     </div>
                     <div class="progress mt-1" style="height: 6px;">
-                        <div id="fatigue-bar" class="progress-bar bg-success" style="width: 0%;"></div>
+                        <div id="fatigue-bar" class="progress-bar bg-secondary" style="width: 0%;"></div>
                     </div>
                 </div>
                 <div style="flex: 1 1 0;">
                     <div class="d-flex justify-content-between align-items-center">
                         <h6 class="mb-0">Стресс</h6>
-                        <span id="stress-value" class="metric-value" style="font-size:1.2rem;">0</span>
+                        <span id="stress-value" class="metric-value" style="font-size:1.1rem;">—</span>
                     </div>
                     <div class="progress mt-1" style="height: 6px;">
-                        <div id="stress-bar" class="progress-bar bg-success" style="width: 0%;"></div>
+                        <div id="stress-bar" class="progress-bar bg-secondary" style="width: 0%;"></div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="dashboard-card metric-card">
-            <h6 class="mb-1">Радар состояния</h6>
-            <canvas id="radar" style="max-height: 220px;"></canvas>
-        </div>
-
-        <div id="advice-card" class="advice-card flex-grow-1 d-flex flex-column justify-content-center">
+        <div id="advice-card" class="advice-card d-flex flex-column" style="min-height: 90px;">
             <div class="d-flex justify-content-between align-items-start">
                 <div class="label mb-1">Рекомендация</div>
                 <button id="self-report-btn" class="btn btn-sm btn-outline-light py-0" type="button">Как я?</button>
             </div>
             <p id="advice-text" class="mb-0">Запустите камеру — система соберёт базу и начнёт давать советы.</p>
+        </div>
+
+        <div class="dashboard-card metric-card">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <h6 class="mb-0">Радар состояния</h6>
+                <small id="radar-hint" class="text-muted">нет данных</small>
+            </div>
+            <canvas id="radar" style="max-height: 200px;"></canvas>
         </div>
     </div>
 </div>

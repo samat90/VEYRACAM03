@@ -73,10 +73,11 @@ class VeyraCamera {
                 labels: ['Поза', 'Бодрость', 'Расслабленность', 'Сосредоточенность', 'Дыхание', 'Эмоция'],
                 datasets: [{
                     label: 'Состояние',
-                    data: [50, 50, 50, 50, 50, 50],
+                    data: [null, null, null, null, null, null],
                     backgroundColor: 'rgba(0, 210, 255, 0.2)',
                     borderColor: 'rgba(0, 210, 255, 0.9)',
                     pointBackgroundColor: 'rgba(0, 210, 255, 1)',
+                    spanGaps: false,
                 }],
             },
             options: {
@@ -100,30 +101,43 @@ class VeyraCamera {
         const posture = data.posture || {};
         const blink = data.blink || {};
         const breath = data.respiration || {};
+        const hint = document.getElementById('radar-hint');
 
-        // Все оси: 0 — плохо, 100 — хорошо
-        const postureScore = posture.status === 'норма' ? 90
-            : posture.status === 'небольшой наклон' ? 60
-            : posture.status === 'сильный наклон' || posture.status === 'плечи неровно' ? 25
-            : 50;
-        const energy = Math.max(0, 100 - (data.fatigue || 0));
-        const calm = Math.max(0, 100 - (data.stress || 0));
-        const focus = data.attention === 'сосредоточен' ? 90
-            : data.attention === 'unknown' ? 50
-            : 30;
+        const faceDetected = data.head_pose !== null && data.head_pose !== undefined;
+        const poseDetected = data.pose_landmarks !== null && data.pose_landmarks !== undefined;
+        const postureReady = poseDetected && posture.calibration_complete;
+        const blinkReady = faceDetected && blink.calibration_complete;
+
+        const postureMap = {
+            'норма': 90, 'небольшой наклон': 55,
+            'сильный наклон': 20, 'плечи неровно': 25,
+        };
+        const emotionMap = {
+            happy: 90, neutral: 70, surprised: 60, sad: 30, angry: 20,
+        };
+
+        const postureScore = postureReady && postureMap[posture.status] !== undefined
+            ? postureMap[posture.status] : null;
+        const energy = blinkReady ? Math.max(0, 100 - (data.fatigue || 0)) : null;
+        const calm = blinkReady && data.heart_rate > 0
+            ? Math.max(0, 100 - (data.stress || 0)) : null;
+        const focus = faceDetected && data.attention && data.attention !== 'unknown'
+            ? (data.attention === 'сосредоточен' ? 90 : 35) : null;
         const breathScore = breath.rate > 0
-            ? Math.max(0, 100 - Math.abs(breath.rate - 14) * 5)
-            : 50;
-        const emotionScore = data.emotion === 'happy' ? 90
-            : data.emotion === 'neutral' ? 70
-            : data.emotion === 'surprised' ? 60
-            : data.emotion === 'sad' ? 30
-            : data.emotion === 'angry' ? 20 : 50;
+            ? Math.max(0, 100 - Math.abs(breath.rate - 14) * 5) : null;
+        const emotionScore = faceDetected && emotionMap[data.emotion] !== undefined
+            ? emotionMap[data.emotion] : null;
 
-        this.radarChart.data.datasets[0].data = [
-            postureScore, energy, calm, focus, breathScore, emotionScore,
-        ];
+        const values = [postureScore, energy, calm, focus, breathScore, emotionScore];
+        this.radarChart.data.datasets[0].data = values;
         this.radarChart.update('none');
+
+        const filled = values.filter(v => v !== null).length;
+        if (hint) {
+            if (filled === 0) hint.textContent = 'нет данных';
+            else if (filled < 6) hint.textContent = `${filled}/6 осей готово`;
+            else hint.textContent = '';
+        }
     }
 
     openReport() {
@@ -433,15 +447,44 @@ class VeyraCamera {
         const blinkEl = document.getElementById('blink-value');
         if (blink.calibrating) {
             blinkEl.textContent = '…';
+        } else if (blink.rate > 0) {
+            blinkEl.textContent = Math.round(blink.rate);
         } else {
-            blinkEl.textContent = Math.round(blink.rate || 0);
+            blinkEl.textContent = '—';
         }
         const perclosEl = document.getElementById('perclos-value');
-        if (perclosEl) perclosEl.textContent = `${blink.perclos || 0}%`;
+        if (perclosEl) {
+            perclosEl.textContent = blink.calibration_complete && blink.perclos !== undefined
+                ? `${blink.perclos}%` : '—';
+        }
 
         const breath = data.respiration || {};
         document.getElementById('breath-value').textContent =
             breath.rate > 0 ? Math.round(breath.rate) : '—';
+
+        const hrvEl = document.getElementById('hrv-value');
+        const hrvDetail = document.getElementById('hrv-detail');
+        if (hrvEl) {
+            if (data.hrv_rmssd_ms > 0) {
+                hrvEl.textContent = Math.round(data.hrv_rmssd_ms);
+                if (hrvDetail) hrvDetail.textContent = `RMSSD · SDNN ${Math.round(data.hrv_sdnn_ms || 0)}`;
+            } else {
+                hrvEl.textContent = '—';
+                if (hrvDetail) hrvDetail.textContent = 'RMSSD мс';
+            }
+        }
+
+        const stabEl = document.getElementById('stability-value');
+        if (stabEl) {
+            stabEl.textContent = (data.stability_std && data.stability_std > 0)
+                ? Number(data.stability_std).toFixed(1) : '—';
+        }
+
+        const yawnEl = document.getElementById('yawn-value');
+        if (yawnEl) {
+            const yc = data.yawn && data.yawn.count;
+            yawnEl.textContent = yc > 0 ? yc : (data.yawn ? '0' : '—');
+        }
 
         const hrEl = document.getElementById('hr-value');
         const hrDetail = document.getElementById('hr-detail');
@@ -454,11 +497,17 @@ class VeyraCamera {
             hrDetail.textContent = 'прогрев ~10 сек';
         }
 
-        const emotion = data.emotion || 'neutral';
-        document.getElementById('emotion-value').textContent = EMOTION_MAP[emotion] || emotion;
-        const conf = Math.round((data.emotion_confidence || 0) * 100);
+        const faceDetected = data.head_pose !== null && data.head_pose !== undefined;
+        const emoEl = document.getElementById('emotion-value');
         const emoDetail = document.getElementById('emotion-detail');
-        if (emoDetail) emoDetail.textContent = `уверенность ${conf}%`;
+        if (faceDetected && data.emotion) {
+            emoEl.textContent = EMOTION_MAP[data.emotion] || data.emotion;
+            const conf = Math.round((data.emotion_confidence || 0) * 100);
+            if (emoDetail) emoDetail.textContent = `${conf}%`;
+        } else {
+            emoEl.textContent = '—';
+            if (emoDetail) emoDetail.textContent = '—';
+        }
 
         const attEl = document.getElementById('attention-value');
         const attention = data.attention || 'unknown';
@@ -479,31 +528,43 @@ class VeyraCamera {
             hpDetail.textContent = 'pitch — · yaw —';
         }
 
-        const fatigue = data.fatigue || 0;
+        const blinkReady = (data.blink && data.blink.calibration_complete);
         const fVal = document.getElementById('fatigue-value');
         const fBar = document.getElementById('fatigue-bar');
-        fVal.textContent = fatigue;
-        fBar.style.width = fatigue + '%';
-        fBar.className = 'progress-bar ' + (
-            fatigue >= 70 ? 'bg-danger' :
-            fatigue >= 45 ? 'bg-warning' : 'bg-success'
-        );
+        if (blinkReady) {
+            const fatigue = data.fatigue || 0;
+            fVal.textContent = fatigue;
+            fBar.style.width = fatigue + '%';
+            fBar.className = 'progress-bar ' + (
+                fatigue >= 70 ? 'bg-danger' :
+                fatigue >= 45 ? 'bg-warning' : 'bg-success'
+            );
+        } else {
+            fVal.textContent = '—';
+            fBar.style.width = '0%';
+            fBar.className = 'progress-bar bg-secondary';
+        }
 
-        const stress = data.stress || 0;
         const sVal = document.getElementById('stress-value');
         const sBar = document.getElementById('stress-bar');
-        if (sVal) sVal.textContent = stress;
-        if (sBar) {
-            sBar.style.width = stress + '%';
-            sBar.className = 'progress-bar ' + (
-                stress >= 70 ? 'bg-danger' :
-                stress >= 45 ? 'bg-warning' : 'bg-success'
-            );
+        if (sVal && sBar) {
+            if (blinkReady && data.heart_rate > 0) {
+                const stress = data.stress || 0;
+                sVal.textContent = stress;
+                sBar.style.width = stress + '%';
+                sBar.className = 'progress-bar ' + (
+                    stress >= 70 ? 'bg-danger' :
+                    stress >= 45 ? 'bg-warning' : 'bg-success'
+                );
+            } else {
+                sVal.textContent = '—';
+                sBar.style.width = '0%';
+                sBar.className = 'progress-bar bg-secondary';
+            }
         }
 
         this.updateRadar(data);
 
-        const faceDetected = data.head_pose !== null && data.head_pose !== undefined;
         const poseDetected = data.pose_landmarks !== null && data.pose_landmarks !== undefined;
         const faceEl = document.getElementById('face-status');
         const poseEl = document.getElementById('pose-status');
