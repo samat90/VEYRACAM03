@@ -72,11 +72,18 @@ class PoseDetector:
 
         self.current_status = 'норма'
 
+        self.angle_history = deque(maxlen=90)  # окно ~6 сек при 15 FPS
+
     def _calibration_complete(self):
         return (
             self.baseline_spine_angle is not None
             or self.baseline_shoulder_angle is not None
         )
+
+    def _stability_std(self):
+        if len(self.angle_history) < 10:
+            return 0.0
+        return round(float(np.std(list(self.angle_history))), 2)
 
     def _timestamp_ms(self):
         ts = max(self._last_ts + 1, int(time.monotonic() * 1000))
@@ -108,6 +115,7 @@ class PoseDetector:
             'calibrating': not self._calibration_complete(),
             'calibration_progress': 0.0,
             'calibration_complete': self._calibration_complete(),
+            'stability_std': self._stability_std(),
         }
 
         landmarks, _ = self.detect(image)
@@ -178,6 +186,8 @@ class PoseDetector:
         posture_data['angle'] = round(angle, 1)
         posture_data['mode'] = mode
         posture_data['status'] = self._apply_hysteresis(mode, angle)
+        self.angle_history.append(angle)
+        posture_data['stability_std'] = self._stability_std()
         return posture_data
 
     def _finalize_calibration(self):

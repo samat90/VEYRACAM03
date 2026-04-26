@@ -15,6 +15,16 @@ MODELS_DIR = os.path.join(os.path.dirname(__file__), 'models')
 LEFT_EYE_EAR = [33, 160, 158, 133, 153, 144]
 RIGHT_EYE_EAR = [362, 385, 387, 263, 373, 380]
 
+# MediaPipe FaceLandmarker возвращает 478 точек: 0–467 — лицо, 468–477 — радужки
+RIGHT_IRIS_CENTER = 468
+LEFT_IRIS_CENTER = 473
+
+# Точки щёк для измерения цвета кожи
+LEFT_CHEEK = [50, 101, 36, 205]
+RIGHT_CHEEK = [280, 330, 266, 425]
+
+SACCADE_VELOCITY_THRESHOLD = 0.025  # нормированных единиц / кадр
+
 MIN_BLINK_MS = 80
 MAX_BLINK_MS = 400
 LONG_BLINK_MS = 600
@@ -73,6 +83,10 @@ class BlinkDetector:
         self.rppg = RPPGDetector()
         self._frame_idx = 0
         self._last_raw_emotion = ('neutral', 0.0)
+        self._iris_history = deque(maxlen=60)
+        self._saccade_buffer = deque(maxlen=300)
+        self._cheek_redness_baseline = None
+        self._cheek_redness_samples = deque(maxlen=30)
 
     def _timestamp_ms(self):
         ts = max(self._last_ts + 1, int(time.monotonic() * 1000))
@@ -86,7 +100,62 @@ class BlinkDetector:
         self.eye_closed_start = None
         self.mouth_open_start = None
         self.emotion_history.clear()
+        self._iris_history.clear()
+        self._saccade_buffer.clear()
+        self._cheek_redness_samples.clear()
         self.rppg.pause_reset()
+
+    def _update_saccades(self, landmarks, ts_sec):
+        if len(landmarks) <= LEFT_IRIS_CENTER:
+            return 0.0
+        rx = landmarks[RIGHT_IRIS_CENTER].x
+        ry = landmarks[RIGHT_IRIS_CENTER].y
+        lx = landmarks[LEFT_IRIS_CENTER].x
+        ly = landmarks[LEFT_IRIS_CENTER].y
+        cx = (rx + lx) / 2.0
+        cy = (ry + ly) / 2.0
+        if self._iris_history:
+            px, py, pt = self._iris_history[-1]
+            dt = max(ts_sec - pt, 1e-3)
+            v = ((cx - px) ** 2 + (cy - py) ** 2) ** 0.5 / dt
+            if v > SACCADE_VELOCITY_THRESHOLD * 30:  # порог в норм. ед./сек
+                self._saccade_buffer.append(ts_sec)
+        self._iris_history.append((cx, cy, ts_sec))
+        cutoff = ts_sec - 30.0
+        while self._saccade_buffer and self._saccade_buffer[0] < cutoff:
+            self._saccade_buffer.popleft()
+        return len(self._saccade_buffer) * 2.0  # саккад в минуту (окно 30 сек)
+
+    def _update_skin_color(self, image, landmarks):
+        if landmarks is None:
+            return 0.0
+        h, w = image.shape[:2]
+        samples = []
+        for idx in LEFT_CHEEK + RIGHT_CHEEK:
+            if idx >= len(landmarks):
+                continue
+            cx = int(landmarks[idx].x * w)
+            cy = int(landmarks[idx].y * h)
+            x1, y1 = max(0, cx - 4), max(0, cy - 4)
+            x2, y2 = min(w, cx + 4), min(h, cy + 4)
+            patch = image[y1:y2, x1:x2]
+            if patch.size > 0:
+                samples.append(patch.reshape(-1, 3).mean(axis=0))
+        if not samples:
+            return 0.0
+        mean_bgr = np.mean(samples, axis=0)
+        b, g, r = float(mean_bgr[0]), float(mean_bgr[1]), float(mean_bgr[2])
+        # Простой индекс «покраснения»: R относительно (G+B)/2
+        redness = (r - (g + b) / 2.0) / max(1.0, (r + g + b) / 3.0)
+        self._cheek_redness_samples.append(redness)
+        if self._cheek_redness_baseline is None and len(self._cheek_redness_samples) >= 20:
+            self._cheek_redness_baseline = float(
+                np.median(list(self._cheek_redness_samples))
+            )
+        if self._cheek_redness_baseline is None:
+            return 0.0
+        delta = redness - self._cheek_redness_baseline
+        return round(float(delta), 3)
 
     @staticmethod
     def _ear(eye_indices, landmarks):
@@ -140,6 +209,11 @@ class BlinkDetector:
             'heart_rate': 0.0,
             'heart_rate_confidence': 0.0,
             'rppg_roi': None,
+            'hrv_sdnn_ms': 0.0,
+            'hrv_rmssd_ms': 0.0,
+            'blink_asymmetry': 0.0,
+            'cognitive_load': 0.0,
+            'skin_redness': 0.0,
         }
 
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -153,8 +227,13 @@ class BlinkDetector:
 
         landmarks = results.face_landmarks[0]
 
-        ear = (self._ear(LEFT_EYE_EAR, landmarks) + self._ear(RIGHT_EYE_EAR, landmarks)) / 2.0
+        ear_left = self._ear(LEFT_EYE_EAR, landmarks)
+        ear_right = self._ear(RIGHT_EYE_EAR, landmarks)
+        ear = (ear_left + ear_right) / 2.0
         blink_data['ear'] = round(ear, 3)
+        blink_data['blink_asymmetry'] = round(
+            abs(ear_left - ear_right) / max(ear_left, ear_right, 1e-3), 3
+        )
 
         mar = self._mar(landmarks)
         blink_data['mar'] = round(mar, 3)
@@ -173,6 +252,13 @@ class BlinkDetector:
         blink_data['heart_rate'] = rppg_data['heart_rate']
         blink_data['heart_rate_confidence'] = rppg_data['confidence']
         blink_data['rppg_roi'] = rppg_data.get('roi')
+        blink_data['hrv_sdnn_ms'] = rppg_data.get('sdnn_ms', 0.0)
+        blink_data['hrv_rmssd_ms'] = rppg_data.get('rmssd_ms', 0.0)
+
+        blink_data['cognitive_load'] = round(
+            self._update_saccades(landmarks, ts_sec), 1
+        )
+        blink_data['skin_redness'] = self._update_skin_color(image, landmarks)
 
         if self.ear_threshold is None:
             self.ear_open_samples.append(ear)

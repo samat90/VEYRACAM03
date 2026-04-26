@@ -46,13 +46,104 @@ class VeyraCamera {
         this.consecutiveErrors = 0;
         this.loopTimer = null;
         this.calibrationStartedAt = null;
+        this.radarChart = null;
         this.bindEvents();
+        this.initRadar();
     }
 
     bindEvents() {
         document.getElementById('start-btn').addEventListener('click', () => this.startCamera());
         document.getElementById('pause-btn').addEventListener('click', () => this.togglePause());
         document.getElementById('stop-btn').addEventListener('click', () => this.stopCamera());
+        const reportBtn = document.getElementById('self-report-btn');
+        if (reportBtn) reportBtn.addEventListener('click', () => this.openReport());
+        document.querySelectorAll('.report-btn').forEach(b => {
+            b.addEventListener('click', () => this.submitReport(parseInt(b.dataset.feeling, 10)));
+        });
+    }
+
+    initRadar() {
+        const canvas = document.getElementById('radar');
+        if (!canvas || !window.Chart) return;
+        const styles = getComputedStyle(document.documentElement);
+        const text = styles.getPropertyValue('--card-text') || '#222';
+        this.radarChart = new Chart(canvas.getContext('2d'), {
+            type: 'radar',
+            data: {
+                labels: ['Поза', 'Бодрость', 'Расслабленность', 'Сосредоточенность', 'Дыхание', 'Эмоция'],
+                datasets: [{
+                    label: 'Состояние',
+                    data: [50, 50, 50, 50, 50, 50],
+                    backgroundColor: 'rgba(0, 210, 255, 0.2)',
+                    borderColor: 'rgba(0, 210, 255, 0.9)',
+                    pointBackgroundColor: 'rgba(0, 210, 255, 1)',
+                }],
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    r: {
+                        suggestedMin: 0, suggestedMax: 100,
+                        ticks: { stepSize: 25, color: text, backdropColor: 'transparent' },
+                        pointLabels: { color: text, font: { size: 11 } },
+                        grid: { color: 'rgba(128,128,128,0.3)' },
+                        angleLines: { color: 'rgba(128,128,128,0.3)' },
+                    },
+                },
+            },
+        });
+    }
+
+    updateRadar(data) {
+        if (!this.radarChart) return;
+        const posture = data.posture || {};
+        const blink = data.blink || {};
+        const breath = data.respiration || {};
+
+        // Все оси: 0 — плохо, 100 — хорошо
+        const postureScore = posture.status === 'норма' ? 90
+            : posture.status === 'небольшой наклон' ? 60
+            : posture.status === 'сильный наклон' || posture.status === 'плечи неровно' ? 25
+            : 50;
+        const energy = Math.max(0, 100 - (data.fatigue || 0));
+        const calm = Math.max(0, 100 - (data.stress || 0));
+        const focus = data.attention === 'сосредоточен' ? 90
+            : data.attention === 'unknown' ? 50
+            : 30;
+        const breathScore = breath.rate > 0
+            ? Math.max(0, 100 - Math.abs(breath.rate - 14) * 5)
+            : 50;
+        const emotionScore = data.emotion === 'happy' ? 90
+            : data.emotion === 'neutral' ? 70
+            : data.emotion === 'surprised' ? 60
+            : data.emotion === 'sad' ? 30
+            : data.emotion === 'angry' ? 20 : 50;
+
+        this.radarChart.data.datasets[0].data = [
+            postureScore, energy, calm, focus, breathScore, emotionScore,
+        ];
+        this.radarChart.update('none');
+    }
+
+    openReport() {
+        const m = document.getElementById('report-modal');
+        if (m && window.bootstrap) bootstrap.Modal.getOrCreateInstance(m).show();
+    }
+
+    async submitReport(feeling) {
+        try {
+            await fetch('/self-report/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                },
+                body: JSON.stringify({ feeling }),
+            });
+        } catch (_) {}
+        const m = document.getElementById('report-modal');
+        if (m && window.bootstrap) bootstrap.Modal.getOrCreateInstance(m).hide();
     }
 
     async startCamera() {
@@ -397,6 +488,20 @@ class VeyraCamera {
             fatigue >= 70 ? 'bg-danger' :
             fatigue >= 45 ? 'bg-warning' : 'bg-success'
         );
+
+        const stress = data.stress || 0;
+        const sVal = document.getElementById('stress-value');
+        const sBar = document.getElementById('stress-bar');
+        if (sVal) sVal.textContent = stress;
+        if (sBar) {
+            sBar.style.width = stress + '%';
+            sBar.className = 'progress-bar ' + (
+                stress >= 70 ? 'bg-danger' :
+                stress >= 45 ? 'bg-warning' : 'bg-success'
+            );
+        }
+
+        this.updateRadar(data);
 
         const faceDetected = data.head_pose !== null && data.head_pose !== undefined;
         const poseDetected = data.pose_landmarks !== null && data.pose_landmarks !== undefined;

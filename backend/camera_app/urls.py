@@ -7,7 +7,9 @@ urlpatterns = [
     path('process-frame/', views.process_frame, name='process_frame'),
     path('pause-session/', views.pause_session, name='pause_session'),
     path('stop-session/', views.stop_session, name='stop_session'),
+    path('self-report/', views.self_report, name='self_report'),
     path('api/history/', views.session_history, name='session_history'),
     path('api/sessions/', views.session_list, name='session_list'),
+    path('api/daily/', views.daily_summary, name='daily_summary'),
     path('api/export/<int:session_id>/', views.export_session, name='export_session'),
 ]

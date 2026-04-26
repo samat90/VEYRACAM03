@@ -1,6 +1,6 @@
 from django.test import TestCase
 
-from .advisor import HistoryBuffer, advice_from_metrics, fatigue_score
+from .advisor import HistoryBuffer, advice_from_metrics, fatigue_score, stress_score
 
 
 class FatigueScoreTests(TestCase):
@@ -56,6 +56,22 @@ class AdvisorTests(TestCase):
         )
         self.assertEqual(sev, 3)
         self.assertIn('перерыв', text.lower())
+
+
+class StressScoreTests(TestCase):
+    def test_baseline_zero(self):
+        self.assertEqual(stress_score({}), 0)
+
+    def test_low_hrv_drives_score_up(self):
+        score = stress_score({'hrv_rmssd_ms': 10, 'breath_rate': 14, 'emotion': 'neutral'})
+        self.assertGreaterEqual(score, 30)
+
+    def test_combined_signals_compose(self):
+        score = stress_score({
+            'hrv_rmssd_ms': 12, 'breath_rate': 26, 'emotion': 'angry',
+            'heart_rate': 105, 'stability_std': 5.0, 'skin_redness': 0.08,
+        })
+        self.assertGreaterEqual(score, 90)
 
 
 class HistoryBufferTests(TestCase):

@@ -3,6 +3,58 @@
 from collections import deque
 
 
+def stress_score(metrics):
+    """
+    Композит стресса 0..100. Параллелен fatigue, но измеряет другое:
+    HRV низкая, дыхание учащённое, негативная эмоция, поза нестабильна — всё про стресс.
+    """
+    rmssd = metrics.get('hrv_rmssd_ms') or 0
+    breath_rate = metrics.get('breath_rate') or 0
+    emotion = metrics.get('emotion', 'neutral')
+    hr = metrics.get('heart_rate') or 0
+    stability = metrics.get('stability_std') or 0
+    redness = metrics.get('skin_redness') or 0
+
+    score = 0.0
+    # Низкая HRV (RMSSD < 20 мс) — сильный сигнал стресса
+    if 0 < rmssd < 15:
+        score += 35
+    elif 0 < rmssd < 25:
+        score += 20
+    elif 0 < rmssd < 40:
+        score += 10
+
+    # Учащённое дыхание
+    if breath_rate > 24:
+        score += 20
+    elif breath_rate > 18:
+        score += 10
+
+    # Повышенный пульс
+    if hr > 100:
+        score += 15
+    elif hr > 85:
+        score += 8
+
+    # Негативная эмоция
+    if emotion == 'angry':
+        score += 15
+    elif emotion == 'sad':
+        score += 8
+
+    # Нестабильная поза
+    if stability > 4.0:
+        score += 10
+    elif stability > 2.5:
+        score += 5
+
+    # Покраснение кожи
+    if redness > 0.05:
+        score += 7
+
+    return int(min(100, score))
+
+
 def fatigue_score(metrics):
     perclos = metrics.get('perclos') or 0
     yawn_rate = metrics.get('yawn_rate') or 0
@@ -149,6 +201,12 @@ def advice_from_metrics(metrics, history_buf=None):
         issues.append((1, 'Напряжённое выражение — сделайте паузу.'))
     elif emotion == 'sad':
         issues.append((1, 'Выглядите уставшим — возможно, пора отдохнуть.'))
+
+    stress = stress_score(metrics)
+    if stress >= 70:
+        issues.append((3, f'Высокий уровень стресса ({stress}%) — сделайте дыхательную практику.'))
+    elif stress >= 50:
+        issues.append((2, f'Уровень стресса повышен ({stress}%). Расслабьтесь, потянитесь.'))
 
     if not issues:
         good_posture_streak = _duration_of_status(history, 'posture_status', 'норма')

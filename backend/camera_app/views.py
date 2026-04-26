@@ -14,8 +14,8 @@ from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
-from .advisor import HistoryBuffer, advice_from_metrics, fatigue_score
-from .models import AnalysisSession, MetricSample
+from .advisor import HistoryBuffer, advice_from_metrics, fatigue_score, stress_score
+from .models import AnalysisSession, MetricSample, SelfReport
 from .session_manager import get_detectors, reset_session
 
 logger = logging.getLogger(__name__)
@@ -117,11 +117,18 @@ def process_frame(request):
             'attention': blink_data.get('attention', 'unknown'),
             'heart_rate': blink_data.get('heart_rate', 0),
             'heart_rate_confidence': blink_data.get('heart_rate_confidence', 0),
+            'hrv_sdnn_ms': blink_data.get('hrv_sdnn_ms', 0),
+            'hrv_rmssd_ms': blink_data.get('hrv_rmssd_ms', 0),
+            'blink_asymmetry': blink_data.get('blink_asymmetry', 0),
+            'cognitive_load': blink_data.get('cognitive_load', 0),
+            'skin_redness': blink_data.get('skin_redness', 0),
+            'stability_std': posture_data.get('stability_std', 0),
         }
 
         history_buf = _get_history(session_key)
         history_buf.push(metrics)
         fatigue = fatigue_score(metrics)
+        stress = stress_score(metrics)
 
         _persist_sample(session_key, metrics)
 
@@ -170,7 +177,14 @@ def process_frame(request):
             'attention': metrics['attention'],
             'heart_rate': metrics['heart_rate'],
             'heart_rate_confidence': metrics['heart_rate_confidence'],
+            'hrv_sdnn_ms': metrics['hrv_sdnn_ms'],
+            'hrv_rmssd_ms': metrics['hrv_rmssd_ms'],
+            'blink_asymmetry': metrics['blink_asymmetry'],
+            'cognitive_load': metrics['cognitive_load'],
+            'skin_redness': metrics['skin_redness'],
+            'stability_std': metrics['stability_std'],
             'fatigue': fatigue,
+            'stress': stress,
             'advice': advice_text,
             'advice_severity': advice_severity,
             'timestamp': time.time(),
@@ -179,6 +193,36 @@ def process_frame(request):
     except Exception as exc:
         logger.exception('process_frame failed: %s', exc)
         return JsonResponse({'success': False, 'error': str(exc)}, status=500)
+
+
+@require_POST
+def self_report(request):
+    session_key = _ensure_session(request)
+    sid = _active_session_obj.get(session_key)
+    try:
+        data = json.loads(request.body)
+        feeling = int(data.get('feeling', 0))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return JsonResponse({'success': False, 'error': 'invalid feeling'}, status=400)
+    if not (1 <= feeling <= 5):
+        return JsonResponse({'success': False, 'error': 'feeling must be 1..5'}, status=400)
+    if sid is None:
+        return JsonResponse({'success': False, 'error': 'no active session'}, status=400)
+    metrics = _get_history(session_key).last_n(1)
+    fatigue_now = fatigue_score(metrics[0]) if metrics else None
+    stress_now = stress_score(metrics[0]) if metrics else None
+    SelfReport.objects.create(
+        session_id=sid,
+        feeling=feeling,
+        fatigue_at_report=fatigue_now,
+        stress_at_report=stress_now,
+        note=str(data.get('note', ''))[:120],
+    )
+    return JsonResponse({
+        'success': True,
+        'fatigue_at_report': fatigue_now,
+        'stress_at_report': stress_now,
+    })
 
 
 @require_POST
@@ -279,6 +323,45 @@ def session_list(request):
             for s in sessions
         ],
     })
+
+
+@require_GET
+def daily_summary(request):
+    """Агрегаты по дням за последние 14 дней."""
+    from datetime import timedelta
+    since = timezone.now() - timedelta(days=14)
+    samples = MetricSample.objects.filter(created_at__gte=since)
+    by_day = {}
+    for s in samples:
+        day = s.created_at.date().isoformat()
+        d = by_day.setdefault(day, {
+            'angles': [], 'blink': [], 'perclos': [], 'breath': [],
+            'emotions': Counter(), 'count': 0,
+        })
+        if s.posture_angle is not None:
+            d['angles'].append(s.posture_angle)
+        d['blink'].append(s.blink_rate)
+        d['perclos'].append(s.perclos)
+        d['breath'].append(s.breath_rate)
+        if s.emotion:
+            d['emotions'][s.emotion] += 1
+        d['count'] += 1
+
+    days = []
+    for day in sorted(by_day):
+        d = by_day[day]
+        emo_top = d['emotions'].most_common(1)[0][0] if d['emotions'] else None
+        avg = lambda xs: round(sum(xs) / len(xs), 1) if xs else None
+        days.append({
+            'date': day,
+            'samples': d['count'],
+            'avg_posture_angle': avg(d['angles']),
+            'avg_blink_rate': avg(d['blink']),
+            'avg_perclos': avg(d['perclos']),
+            'avg_breath_rate': avg(d['breath']),
+            'dominant_emotion': emo_top,
+        })
+    return JsonResponse({'success': True, 'days': days})
 
 
 @require_GET

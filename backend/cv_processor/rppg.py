@@ -27,6 +27,8 @@ class RPPGDetector:
         self.heart_rate = 0.0
         self.confidence = 0.0
         self.last_analysis = 0.0
+        self.sdnn_ms = 0.0
+        self.rmssd_ms = 0.0
 
     def pause_reset(self):
         self.r_buffer.clear()
@@ -34,6 +36,8 @@ class RPPGDetector:
         self.b_buffer.clear()
         self.t_buffer.clear()
         self.last_analysis = 0.0
+        self.sdnn_ms = 0.0
+        self.rmssd_ms = 0.0
 
     def _trim(self, now):
         cutoff = now - BUFFER_SEC
@@ -93,6 +97,8 @@ class RPPGDetector:
         data['heart_rate'] = self.heart_rate
         data['confidence'] = self.confidence
         data['ready'] = self.heart_rate > 0
+        data['sdnn_ms'] = self.sdnn_ms
+        data['rmssd_ms'] = self.rmssd_ms
         return data
 
     def _analyze(self):
@@ -159,3 +165,31 @@ class RPPGDetector:
             else:
                 self.heart_rate = round(0.7 * self.heart_rate + 0.3 * hr_bpm, 0)
             self.confidence = round(min(1.0, max(0.0, (snr - 1.5) / 4.0)), 2)
+            self._estimate_hrv(s, fs)
+
+    def _estimate_hrv(self, signal_1d, fs):
+        """Inter-beat intervals из пиков отфильтрованного сигнала → SDNN, RMSSD."""
+        nyq = fs / 2.0
+        if nyq <= 0:
+            return
+        # Грубая оценка ожидаемого периода удара по уже найденному HR
+        if self.heart_rate <= 0:
+            return
+        period_sec = 60.0 / self.heart_rate
+        min_distance = max(1, int(period_sec * fs * 0.6))
+        try:
+            peaks, _ = signal.find_peaks(signal_1d, distance=min_distance)
+        except (ValueError, RuntimeError):
+            return
+        if len(peaks) < 4:
+            return
+        ibi_sec = np.diff(peaks) / fs
+        ibi_sec = ibi_sec[(ibi_sec > 0.33) & (ibi_sec < 1.5)]  # 40–180 BPM физиологично
+        if len(ibi_sec) < 3:
+            return
+        ibi_ms = ibi_sec * 1000.0
+        sdnn = float(np.std(ibi_ms))
+        diffs = np.diff(ibi_ms)
+        rmssd = float(np.sqrt(np.mean(diffs ** 2))) if len(diffs) else 0.0
+        self.sdnn_ms = round(sdnn, 1)
+        self.rmssd_ms = round(rmssd, 1)

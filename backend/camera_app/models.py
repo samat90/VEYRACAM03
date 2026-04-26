@@ -32,3 +32,17 @@ class MetricSample(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+
+class SelfReport(models.Model):
+    """Самооценка пользователя 1..5 для валидации измерений."""
+
+    session = models.ForeignKey(
+        AnalysisSession, related_name='reports', on_delete=models.CASCADE
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    feeling = models.IntegerField()
+    fatigue_at_report = models.FloatField(null=True, blank=True)
+    stress_at_report = models.FloatField(null=True, blank=True)
+    note = models.CharField(max_length=120, blank=True)

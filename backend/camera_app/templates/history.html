@@ -28,6 +28,28 @@
     <div id="empty-state" class="text-center py-5" style="color: white; display:none;">
         <p>Нет сохранённых данных. Запустите камеру на главной странице.</p>
     </div>
+
+    <h4 class="mt-4 mb-2" style="color: white;">Дневник за 14 дней</h4>
+    <div class="dashboard-card p-3">
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Дата</th>
+                        <th>Замеров</th>
+                        <th>Угол осанки</th>
+                        <th>Моргания/мин</th>
+                        <th>PERCLOS %</th>
+                        <th>Дыхание</th>
+                        <th>Эмоция</th>
+                    </tr>
+                </thead>
+                <tbody id="diary-body">
+                    <tr><td colspan="7" class="text-center text-muted">Загрузка…</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -152,7 +174,33 @@ async function loadSessions() {
     else renderSeries([]);
 }
 
+async function loadDaily() {
+    const body = document.getElementById('diary-body');
+    try {
+        const r = await fetch('/api/daily/');
+        const d = await r.json();
+        if (!d.days || !d.days.length) {
+            body.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Пока пусто</td></tr>';
+            return;
+        }
+        body.innerHTML = d.days.reverse().map(row => `
+            <tr>
+                <td>${row.date}</td>
+                <td>${row.samples}</td>
+                <td>${row.avg_posture_angle ?? '—'}</td>
+                <td>${row.avg_blink_rate ?? '—'}</td>
+                <td>${row.avg_perclos ?? '—'}</td>
+                <td>${row.avg_breath_rate ?? '—'}</td>
+                <td>${row.dominant_emotion ?? '—'}</td>
+            </tr>
+        `).join('');
+    } catch (e) {
+        body.innerHTML = '<tr><td colspan="7" class="text-danger">Ошибка загрузки</td></tr>';
+    }
+}
+
 document.getElementById('session-multi').addEventListener('change', refreshSelection);
 loadSessions();
+loadDaily();
 </script>
 {% endblock %}
