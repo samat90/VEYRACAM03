@@ -6,3 +6,4 @@ Pillow==10.4.0
 scipy==1.14.1
 onnxruntime
 hsemotion-onnx
+gunicorn==23.0.0
