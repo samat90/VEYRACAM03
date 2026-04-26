@@ -1,6 +1,15 @@
 {% extends 'base.html' %}
 
+{% block top_meta %}
+<span>Камера: <span id="camera-status" class="badge bg-secondary">Выключена</span></span>
+<span>Лицо: <span id="face-status" class="badge bg-secondary">—</span></span>
+<span>Поза: <span id="pose-status" class="badge bg-secondary">—</span></span>
+<span>FPS: <span id="fps">0</span></span>
+<span>Разрешение: <span id="resolution">—</span></span>
+{% endblock %}
+
 {% block content %}
+<div id="error-banner" class="alert alert-danger m-2" role="alert" style="display:none;"></div>
 <div class="row g-3 h-100">
     <div class="col-lg-7 col-md-6 d-flex">
         <div class="dashboard-card video-card flex-grow-1">

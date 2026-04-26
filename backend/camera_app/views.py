@@ -24,6 +24,15 @@ _active_session_obj = {}
 _history_buffers = {}
 
 
+def _serialize_landmarks(landmarks):
+    if landmarks is None:
+        return None
+    return [
+        {'x': round(lm.x, 4), 'y': round(lm.y, 4), 'v': round(lm.visibility, 2)}
+        for lm in landmarks
+    ]
+
+
 def _ensure_session(request):
     if not request.session.session_key:
         request.session.create()
@@ -68,13 +77,9 @@ def process_frame(request):
 
         posture_data = pose.detect_posture(image)
         blink_data = blink.detect_blink(image)
-        respiration_data = resp.detect_respiration(image)
+        respiration_data = resp.update(posture_data.get('landmarks'))
 
-        if posture_data.get('landmarks'):
-            image = pose.draw_landmarks(image, posture_data['landmarks'])
-
-        _, buffer = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 75])
-        processed_image = base64.b64encode(buffer).decode('utf-8')
+        pose_landmarks = _serialize_landmarks(posture_data.get('landmarks'))
 
         metrics = {
             'posture_angle': posture_data.get('angle'),
@@ -116,7 +121,7 @@ def process_frame(request):
 
         return JsonResponse({
             'success': True,
-            'processed_image': processed_image,
+            'pose_landmarks': pose_landmarks,
             'posture': {
                 'angle': metrics['posture_angle'],
                 'status': metrics['posture_status'],

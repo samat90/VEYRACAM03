@@ -24,6 +24,7 @@ CALIBRATION_MIN = 30
 
 PERCLOS_WINDOW_SEC = 60.0
 EMOTION_SMOOTHING_WINDOW = 30
+EMOTION_CNN_EVERY_N = 5
 YAWN_THRESHOLD = 0.55
 YAWN_MIN_DURATION_MS = 800
 
@@ -49,7 +50,7 @@ class BlinkDetector:
             output_face_blendshapes=True,
         )
         self.detector = vision.FaceLandmarker.create_from_options(options)
-        self._start_ms = int(time.monotonic() * 1000)
+        self._last_ts = 0
 
         self.blink_count = 0
         self.blink_timestamps = deque(maxlen=120)
@@ -70,9 +71,13 @@ class BlinkDetector:
 
         self.emotion_classifier = emotion_classifier
         self.rppg = RPPGDetector()
+        self._frame_idx = 0
+        self._last_raw_emotion = ('neutral', 0.0)
 
     def _timestamp_ms(self):
-        return max(1, int(time.monotonic() * 1000) - self._start_ms)
+        ts = max(self._last_ts + 1, int(time.monotonic() * 1000))
+        self._last_ts = ts
+        return ts
 
     @staticmethod
     def _ear(eye_indices, landmarks):
@@ -222,11 +227,15 @@ class BlinkDetector:
         blink_data['long_blink_count'] = self.long_blink_count
         blink_data['yawn_count'] = self.yawn_count
 
-        raw_emo, raw_conf = 'neutral', 0.0
+        self._frame_idx += 1
         if self.emotion_classifier is not None and self.emotion_classifier.available:
-            raw_emo, raw_conf = self.emotion_classifier.classify(image, landmarks)
+            if self._frame_idx % EMOTION_CNN_EVERY_N == 0 or self._last_raw_emotion[1] == 0.0:
+                self._last_raw_emotion = self.emotion_classifier.classify(image, landmarks)
+            raw_emo, raw_conf = self._last_raw_emotion
         elif results.face_blendshapes:
             raw_emo, raw_conf = self._classify_emotion_blendshapes(results.face_blendshapes[0])
+        else:
+            raw_emo, raw_conf = 'neutral', 0.0
 
         smooth_emo, smooth_conf = self._smooth_emotion(raw_emo, raw_conf)
         blink_data['emotion'] = smooth_emo

@@ -1,14 +1,7 @@
-import cv2
-import numpy as np
-import mediapipe as mp
-import os
 import time
+import numpy as np
 from collections import deque
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
 from scipy import signal
-
-MODELS_DIR = os.path.join(os.path.dirname(__file__), 'models')
 
 LEFT_SHOULDER = 11
 RIGHT_SHOULDER = 12
@@ -23,52 +16,27 @@ ANALYSIS_INTERVAL = 2.0
 
 
 class RespirationDetector:
-    def __init__(self):
-        model_path = os.path.join(MODELS_DIR, 'pose_landmarker_full.task')
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(
-                'Модели MediaPipe не найдены. Запустите: '
-                'python backend/cv_processor/download_models.py'
-            )
-        with open(model_path, 'rb') as f:
-            model_data = f.read()
-        base_options = python.BaseOptions(model_asset_buffer=model_data)
-        options = vision.PoseLandmarkerOptions(
-            base_options=base_options,
-            running_mode=vision.RunningMode.VIDEO,
-            num_poses=1,
-            min_pose_detection_confidence=0.5,
-            min_pose_presence_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
-        self.detector = vision.PoseLandmarker.create_from_options(options)
-        self._start_ms = int(time.monotonic() * 1000)
+    """Считает частоту дыхания по ландмаркам плеч.
 
+    Ландмарки приходят извне (от PoseDetector) — сам MediaPipe не запускаем,
+    чтобы не делать вторую pose-детекцию на кадр.
+    """
+
+    def __init__(self):
         self.signal_buffer = deque(maxlen=BUFFER_MAX)
         self.time_buffer = deque(maxlen=BUFFER_MAX)
         self.breathing_rate = 0.0
         self.confidence = 0.0
         self.last_analysis = 0.0
 
-    def _timestamp_ms(self):
-        return max(1, int(time.monotonic() * 1000) - self._start_ms)
-
-    def detect_respiration(self, image):
+    def update(self, landmarks):
         data = {
             'breathing_rate': self.breathing_rate,
             'phase': 'unknown',
             'confidence': self.confidence,
         }
-
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_rgb)
-        ts_ms = self._timestamp_ms()
-        ts_sec = ts_ms / 1000.0
-        results = self.detector.detect_for_video(mp_image, ts_ms)
-
-        if not results.pose_landmarks:
+        if landmarks is None:
             return data
-        landmarks = results.pose_landmarks[0]
 
         ls = landmarks[LEFT_SHOULDER]
         rs = landmarks[RIGHT_SHOULDER]
@@ -78,10 +46,10 @@ class RespirationDetector:
             return data
 
         shoulder_y = (ls.y + rs.y) / 2.0
-        # Вычитаем движение головы, чтобы покачивания не давали ложный сигнал
         if nose.visibility > 0.5:
             shoulder_y = shoulder_y - nose.y
 
+        ts_sec = time.monotonic()
         self.signal_buffer.append(shoulder_y)
         self.time_buffer.append(ts_sec)
 

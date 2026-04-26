@@ -57,7 +57,7 @@ class PoseDetector:
             min_tracking_confidence=0.5,
         )
         self.detector = vision.PoseLandmarker.create_from_options(options)
-        self._start_ms = int(time.monotonic() * 1000)
+        self._last_ts = 0
 
         self._filters = {
             i: Vec2Filter(freq=15.0, mincutoff=1.2, beta=0.02)
@@ -77,7 +77,9 @@ class PoseDetector:
         )
 
     def _timestamp_ms(self):
-        return max(1, int(time.monotonic() * 1000) - self._start_ms)
+        ts = max(self._last_ts + 1, int(time.monotonic() * 1000))
+        self._last_ts = ts
+        return ts
 
     def detect(self, image):
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)

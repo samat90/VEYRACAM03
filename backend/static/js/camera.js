@@ -11,6 +11,19 @@ const EMOTION_MAP = {
     neutral: 'Нейтрально',
 };
 
+const POSE_CONNECTIONS = [
+    [11, 12], [11, 23], [12, 24], [23, 24],
+    [11, 13], [13, 15], [12, 14], [14, 16],
+    [23, 25], [25, 27], [24, 26], [26, 28],
+    [27, 29], [28, 30],
+    [0, 1], [1, 2], [2, 3], [3, 7],
+    [0, 4], [4, 5], [5, 6], [6, 8],
+];
+
+const TARGET_FPS = 15;
+const FRAME_INTERVAL_MS = Math.round(1000 / TARGET_FPS);
+const FRAME_TIMEOUT_MS = 4000;
+
 class VeyraCamera {
     constructor() {
         this.video = document.getElementById('video');
@@ -20,11 +33,14 @@ class VeyraCamera {
         this.octx = this.overlay ? this.overlay.getContext('2d') : null;
         this.calibrationOverlay = document.getElementById('calibration-overlay');
         this.calibrationBar = document.getElementById('calibration-bar');
+        this.errorBanner = document.getElementById('error-banner');
 
         this.isStreaming = false;
         this.stream = null;
         this.frameCount = 0;
         this.inFlight = false;
+        this.consecutiveErrors = 0;
+        this.loopTimer = null;
         this.bindEvents();
     }
 
@@ -56,17 +72,22 @@ class VeyraCamera {
                 `${this.video.videoWidth}x${this.video.videoHeight}`;
 
             if (this.calibrationOverlay) this.calibrationOverlay.style.display = '';
+            this.hideError();
 
             this.isStreaming = true;
             this.startProcessing();
         } catch (err) {
             console.error('Camera access error:', err);
-            alert('Не удалось получить доступ к камере. Проверьте разрешения.');
+            this.showError('Не удалось получить доступ к камере. Проверьте разрешения.');
         }
     }
 
     async stopCamera() {
         this.isStreaming = false;
+        if (this.loopTimer) {
+            clearTimeout(this.loopTimer);
+            this.loopTimer = null;
+        }
         if (this.stream) {
             this.stream.getTracks().forEach(t => t.stop());
             this.stream = null;
@@ -100,7 +121,7 @@ class VeyraCamera {
         let lastTime = Date.now();
         let frames = 0;
 
-        const loop = async () => {
+        const tick = async () => {
             if (!this.isStreaming) return;
             frames++;
             const now = Date.now();
@@ -113,18 +134,21 @@ class VeyraCamera {
             if (!this.inFlight) {
                 await this.processSingleFrame();
             }
-            requestAnimationFrame(loop);
+            this.loopTimer = setTimeout(tick, FRAME_INTERVAL_MS);
         };
-        loop();
+        tick();
     }
 
     async processSingleFrame() {
         this.inFlight = true;
         this.frameCount++;
-        const needAdvice = this.frameCount % 120 === 0;
+        const needAdvice = this.frameCount % 30 === 0;
 
         this.ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
-        const imageData = this.canvas.toDataURL('image/jpeg', 0.75);
+        const imageData = this.canvas.toDataURL('image/jpeg', 0.7);
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), FRAME_TIMEOUT_MS);
 
         try {
             const response = await fetch('/process-frame/', {
@@ -138,10 +162,14 @@ class VeyraCamera {
                     timestamp: Date.now(),
                     need_advice: needAdvice,
                 }),
+                signal: controller.signal,
             });
+            clearTimeout(timeoutId);
             const data = await response.json();
             if (data.success) {
-                this.renderProcessedImage(data.processed_image);
+                this.consecutiveErrors = 0;
+                this.hideError();
+                this.drawSkeleton(data.pose_landmarks);
                 this.renderMetrics(data);
                 if (data.advice) {
                     document.getElementById('advice-text').textContent = data.advice;
@@ -151,22 +179,62 @@ class VeyraCamera {
                         card.classList.add('severity-' + (data.advice_severity || 0));
                     }
                 }
+            } else {
+                this.handleFrameError(data.error || 'Ошибка обработки');
             }
         } catch (err) {
-            console.error('Frame processing error:', err);
+            clearTimeout(timeoutId);
+            const msg = err.name === 'AbortError'
+                ? 'Сервер не ответил за 4 секунды'
+                : 'Сетевая ошибка: ' + err.message;
+            console.error('Frame error:', err);
+            this.handleFrameError(msg);
         } finally {
             this.inFlight = false;
         }
     }
 
-    renderProcessedImage(b64) {
-        if (!b64 || !this.octx) return;
-        const img = new Image();
-        img.onload = () => {
-            this.octx.clearRect(0, 0, this.overlay.width, this.overlay.height);
-            this.octx.drawImage(img, 0, 0, this.overlay.width, this.overlay.height);
-        };
-        img.src = 'data:image/jpeg;base64,' + b64;
+    handleFrameError(msg) {
+        this.consecutiveErrors++;
+        if (this.consecutiveErrors >= 3) {
+            this.showError(msg);
+        }
+    }
+
+    showError(text) {
+        if (this.errorBanner) {
+            this.errorBanner.textContent = text;
+            this.errorBanner.style.display = '';
+        }
+    }
+
+    hideError() {
+        if (this.errorBanner) this.errorBanner.style.display = 'none';
+    }
+
+    drawSkeleton(landmarks) {
+        if (!this.octx) return;
+        this.octx.clearRect(0, 0, this.overlay.width, this.overlay.height);
+        if (!landmarks) return;
+        const w = this.overlay.width;
+        const h = this.overlay.height;
+        this.octx.lineWidth = 2;
+        this.octx.strokeStyle = 'rgba(255, 60, 60, 0.9)';
+        this.octx.beginPath();
+        for (const [a, b] of POSE_CONNECTIONS) {
+            const la = landmarks[a], lb = landmarks[b];
+            if (!la || !lb || la.v < 0.5 || lb.v < 0.5) continue;
+            this.octx.moveTo(la.x * w, la.y * h);
+            this.octx.lineTo(lb.x * w, lb.y * h);
+        }
+        this.octx.stroke();
+        this.octx.fillStyle = 'rgba(80, 255, 80, 0.95)';
+        for (const lm of landmarks) {
+            if (lm.v < 0.5) continue;
+            this.octx.beginPath();
+            this.octx.arc(lm.x * w, lm.y * h, 3, 0, Math.PI * 2);
+            this.octx.fill();
+        }
     }
 
     updateCalibration(data) {
@@ -276,10 +344,14 @@ class VeyraCamera {
             fatigue >= 45 ? 'bg-warning' : 'bg-success'
         );
 
-        document.getElementById('face-status').className = 'badge bg-success';
-        document.getElementById('face-status').textContent = 'Активно';
-        document.getElementById('pose-status').className = 'badge bg-success';
-        document.getElementById('pose-status').textContent = 'Активно';
+        const faceDetected = data.head_pose !== null && data.head_pose !== undefined;
+        const poseDetected = data.pose_landmarks !== null && data.pose_landmarks !== undefined;
+        const faceEl = document.getElementById('face-status');
+        const poseEl = document.getElementById('pose-status');
+        faceEl.className = 'badge ' + (faceDetected ? 'bg-success' : 'bg-warning');
+        faceEl.textContent = faceDetected ? 'Активно' : 'Нет лица';
+        poseEl.className = 'badge ' + (poseDetected ? 'bg-success' : 'bg-warning');
+        poseEl.textContent = poseDetected ? 'Активно' : 'Нет позы';
     }
 
     showSummary(s) {
