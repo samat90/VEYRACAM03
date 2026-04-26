@@ -79,6 +79,15 @@ class BlinkDetector:
         self._last_ts = ts
         return ts
 
+    def pause_reset(self):
+        """Сбрасывает time-series буферы при паузе. Калибровка сохраняется."""
+        self.blink_timestamps.clear()
+        self.closed_history.clear()
+        self.eye_closed_start = None
+        self.mouth_open_start = None
+        self.emotion_history.clear()
+        self.rppg.pause_reset()
+
     @staticmethod
     def _ear(eye_indices, landmarks):
         pts = [np.array([landmarks[i].x, landmarks[i].y]) for i in eye_indices]

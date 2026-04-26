@@ -183,7 +183,12 @@ def process_frame(request):
 
 @require_POST
 def pause_session(request):
-    """Не сбрасывает детекторы — калибровка и счётчики сохраняются."""
+    """Сбрасывает только time-series буферы — калибровка сохраняется."""
+    session_key = _ensure_session(request)
+    detectors = get_detectors(session_key)
+    for d in detectors.values():
+        if hasattr(d, 'pause_reset'):
+            d.pause_reset()
     return JsonResponse({'success': True})
 
 

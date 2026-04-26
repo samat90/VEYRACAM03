@@ -35,6 +35,7 @@ class VeyraCamera {
         this.calibrationOverlay = document.getElementById('calibration-overlay');
         this.calibrationBar = document.getElementById('calibration-bar');
         this.calibrationHint = document.getElementById('calibration-hint');
+        this.pausedOverlay = document.getElementById('paused-overlay');
         this.errorBanner = document.getElementById('error-banner');
 
         this.isStreaming = false;
@@ -96,7 +97,12 @@ class VeyraCamera {
         this.isPaused = !this.isPaused;
         const btn = document.getElementById('pause-btn');
         btn.textContent = this.isPaused ? 'Продолжить' : 'Пауза';
+        btn.className = this.isPaused ? 'btn btn-success' : 'btn btn-warning';
+        if (this.pausedOverlay) {
+            this.pausedOverlay.style.display = this.isPaused ? '' : 'none';
+        }
         if (this.isPaused) {
+            document.getElementById('fps').textContent = '0';
             fetch('/pause-session/', {
                 method: 'POST',
                 headers: { 'X-CSRFToken': getCookie('csrftoken') },
@@ -128,6 +134,8 @@ class VeyraCamera {
         document.getElementById('pose-status').textContent = '—';
 
         if (this.calibrationOverlay) this.calibrationOverlay.style.display = 'none';
+        if (this.pausedOverlay) this.pausedOverlay.style.display = 'none';
+        document.getElementById('pause-btn').className = 'btn btn-warning';
         if (this.octx) {
             this.octx.clearRect(0, 0, this.overlay.width, this.overlay.height);
         }

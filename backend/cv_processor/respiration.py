@@ -29,6 +29,11 @@ class RespirationDetector:
         self.confidence = 0.0
         self.last_analysis = 0.0
 
+    def pause_reset(self):
+        self.signal_buffer.clear()
+        self.time_buffer.clear()
+        self.last_analysis = 0.0
+
     def update(self, landmarks):
         data = {
             'breathing_rate': self.breathing_rate,

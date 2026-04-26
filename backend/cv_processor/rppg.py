@@ -28,6 +28,13 @@ class RPPGDetector:
         self.confidence = 0.0
         self.last_analysis = 0.0
 
+    def pause_reset(self):
+        self.r_buffer.clear()
+        self.g_buffer.clear()
+        self.b_buffer.clear()
+        self.t_buffer.clear()
+        self.last_analysis = 0.0
+
     def _trim(self, now):
         cutoff = now - BUFFER_SEC
         while self.t_buffer and self.t_buffer[0] < cutoff:
